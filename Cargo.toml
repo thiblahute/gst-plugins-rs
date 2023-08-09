@@ -67,6 +67,7 @@ default-members = [
 
   "generic/threadshare",
   "generic/inter",
+  "generic/playbinpool",
 
   "mux/fmp4",
   "mux/mp4",
