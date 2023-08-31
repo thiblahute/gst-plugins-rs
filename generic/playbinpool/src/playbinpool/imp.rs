@@ -684,7 +684,12 @@ impl ElementImpl for PlaybinPoolSrc {
 
 impl BaseSrcImpl for PlaybinPoolSrc {
     fn is_seekable(&self) -> bool {
-        gst::fixme!(CAT, imp: self, "Handle not seekable underlying pipelines");
+        static NOTIFIED: Once = Once::new();
+
+        NOTIFIED.call_once(|| {
+            gst::fixme!(CAT, "Handle not seekable underlying pipelines");
+        });
+
         true
     }
 
