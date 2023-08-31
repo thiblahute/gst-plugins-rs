@@ -18,7 +18,7 @@ use super::{pool::{self, RUNTIME}, PooledPlayBin};
 #[derive(Debug)]
 struct Settings {
     uri: Option<String>,
-    stream_type: gst::StreamType,
+    caps: gst::Caps,
     stream_id: Option<String>,
 }
 
@@ -26,7 +26,9 @@ impl Default for Settings {
     fn default() -> Self {
         Settings {
             uri: None,
-            stream_type: gst::StreamType::VIDEO,
+            caps: gst::Caps::builder_full()
+                .structure_with_any_features(gst::Structure::new_empty("video/x-raw"))
+                .build(),
             stream_id: None,
         }
     }
@@ -51,8 +53,8 @@ struct State {
 #[properties(wrapper_type = super::PlaybinPoolSrc)]
 pub struct PlaybinPoolSrc {
     #[property(name="uri", get, set, type = String, member = uri, blurb = "The URI to play")]
-    #[property(name = "stream-type", get, set, type = gst::StreamType, member = stream_type,
-        blurb = "The type of stream to be used, this is only used of no `stream-id` is specified"
+    #[property(name = "caps", get, set, type = gst::Caps, member = caps,
+        blurb = "The caps of the stream to target"
     )]
     #[property(name = "stream-id", get, set, type = Option<String>, member = stream_id,
         flags = glib::ParamFlags::READWRITE | gst::PARAM_FLAG_MUTABLE_READY,
@@ -444,7 +446,7 @@ impl PlaybinPoolSrc {
                         return return_func(self, c.caps().to_owned().upcast());
                     } else {
                         gst::debug!(CAT, imp: self, "Pushing new caps downstream");
-                        self.obj().set_caps(&c.caps().to_owned()).map_err(|e| {
+                        self.obj().upcast_ref::<gst_base::BaseSrc>().set_caps(&c.caps().to_owned()).map_err(|e| {
                             if self
                                 .obj()
                                 .src_pad()
@@ -789,7 +791,7 @@ impl BaseSrcImpl for PlaybinPoolSrc {
                 imp: self,
                 "{:?} - {:?} Waiting {} state to be reached after {res:?}",
                 settings.stream_id,
-                settings.stream_type,
+                settings.caps,
                 playbin.imp().name()
             );
         }
@@ -823,8 +825,7 @@ impl BaseSrcImpl for PlaybinPoolSrc {
         };
 
         gst::debug!(CAT, imp: self, "Negotiated caps: {:?}", caps);
-        self.obj()
-            .set_caps(&caps)
+        self.obj().upcast_ref::<gst_base::BaseSrc>().set_caps(&caps)
             .map_err(|_| gst::loggable_error!(CAT, "Failed to negotiate caps",))
     }
 

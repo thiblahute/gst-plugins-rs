@@ -8,7 +8,7 @@ use super::pool::CAT;
 struct State {
     stream: Option<gst::Stream>,
     stream_id: Option<String>,
-    stream_type: gst::StreamType,
+    caps: gst::Caps,
     unused_since: Option<std::time::Instant>,
     bus_message_sigid: Option<glib::SignalHandlerId>,
 
@@ -74,7 +74,9 @@ impl Default for PooledPlayBin {
                 unused_since: None,
                 stream: None,
                 stream_id: None,
-                stream_type: gst::StreamType::VIDEO,
+                caps: gst::Caps::builder_full()
+                    .structure_with_any_features(gst::Structure::new_empty("video/x-raw"))
+                    .build(),
                 bus_message_sigid: None,
                 target_src: None,
             }),
@@ -114,8 +116,24 @@ impl PooledPlayBin {
         }
     }
 
+    fn caps(&self) -> gst::Caps {
+        self.state.lock().unwrap().caps.clone()
+    }
+
     pub(crate) fn stream_type(&self) -> gst::StreamType {
-        self.state.lock().unwrap().stream_type
+        match self
+            .state
+            .lock()
+            .unwrap()
+            .caps
+            .structure(0)
+            .map(|s| s.name().as_str())
+        {
+            Some("video/x-raw") => gst::StreamType::VIDEO,
+            Some("audio/x-raw") => gst::StreamType::AUDIO,
+            Some("text/x-raw") => gst::StreamType::TEXT,
+            _ => gst::StreamType::UNKNOWN,
+        }
     }
 
     pub(crate) fn requested_stream_id(&self) -> Option<String> {
@@ -134,19 +152,22 @@ impl PooledPlayBin {
         &self.name
     }
 
-    pub(crate) fn reset(&self, uri: &str, stream_type: gst::StreamType, stream_id: Option<&str>) {
+    pub(crate) fn reset(&self, uri: &str, caps: &gst::Caps, stream_id: Option<&str>) {
         let mut state = self.state.lock().unwrap();
         state.unused_since = None;
         state.stream = None;
+        state.caps = caps.clone();
         state.stream_id = stream_id.map(|s| s.to_string());
-        state.stream_type = stream_type;
+        self.uridecodebin.set_property("caps", caps);
+        self.sink.set_property("caps", caps);
+
         if state.bus_message_sigid.is_none() {
             let bus = self.pipeline.bus().unwrap();
             bus.enable_sync_message_emission();
             state.bus_message_sigid = Some(bus.connect_sync_message(
                 None,
                 glib::clone!(@weak self as this => move |_, msg|
-                             this.handle_bus_message(msg)
+                    this.handle_bus_message(msg)
                 ),
             ));
         }
@@ -209,9 +230,9 @@ impl PooledPlayBin {
                 gst::error!(
                     CAT,
                     imp: self,
-                    "{:?} No stream found for type: {:?}",
+                    "{:?} No stream found for caps: {:?}",
                     self.name,
-                    self.stream_type()
+                    self.caps()
                 );
 
                 return;

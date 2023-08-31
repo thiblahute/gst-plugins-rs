@@ -246,7 +246,7 @@ impl PlaybinPool {
         state: &mut MutexGuard<'lt, State>,
     ) -> PooledPlayBin {
         let uri = src.uri();
-        let stream_type = src.stream_type();
+        let caps = src.caps();
         let stream_id = src.stream_id();
 
         let playbin = if let Some(position) = state.unused_pipelines.iter().position(|p| {
@@ -276,7 +276,7 @@ impl PlaybinPool {
             || {
                 gst::debug!(CAT, "Starting new pipeline");
 
-                let pipeline = PooledPlayBin::new(uri.as_ref(), stream_type, stream_id.as_deref());
+                let pipeline = PooledPlayBin::new(uri.as_ref(), &caps, stream_id.as_deref());
                 let obj = self.obj();
                 let mut outstandings = self.outstandings.n.lock().unwrap();
                 *outstandings += 1;
@@ -313,7 +313,7 @@ impl PlaybinPool {
                 pipeline
             },
             |playbin| {
-                playbin.reset(uri.as_ref(), stream_type, stream_id.as_deref());
+                playbin.reset(uri.as_ref(), &caps, stream_id.as_deref());
 
                 gst::debug!(CAT, "Reusing existing pipeline: {:?}", playbin,);
 

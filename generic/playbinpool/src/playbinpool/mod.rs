@@ -45,8 +45,8 @@ impl PooledPlayBin {
         self.imp().pipeline()
     }
 
-    pub(crate) fn reset(&self, uri: &str, stream_type: gst::StreamType, stream_id: Option<&str>) {
-        self.imp().reset(uri, stream_type, stream_id);
+    pub(crate) fn reset(&self, uri: &str, caps: &gst::Caps, stream_id: Option<&str>) {
+        self.imp().reset(uri, caps, stream_id);
     }
 
     pub(crate) fn stream(&self) -> Option<gst::Stream> {
@@ -59,12 +59,12 @@ impl PooledPlayBin {
 
     pub(crate) fn new(
         uri: &str,
-        stream_type: gst::StreamType,
+        caps: &gst::Caps,
         stream_id: Option<&str>,
     ) -> PooledPlayBin {
         let this: PooledPlayBin = glib::Object::new();
 
-        this.reset(uri, stream_type, stream_id);
+        this.reset(uri, caps, stream_id);
 
         this
     }
