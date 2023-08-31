@@ -8,6 +8,7 @@ option('lewton', type: 'feature', value: 'auto', description: 'Build lewton plug
 option('spotify', type: 'feature', value: 'auto', description: 'Build spotify plugin')
 
 # generic
+option('playbinpool', type: 'feature', value: 'auto', description: 'Build file plugin')
 option('file', type: 'feature', value: 'auto', description: 'Build file plugin')
 option('sodium', type: 'feature', value: 'auto', description: 'Build sodium plugin')
 option('sodium-source', type: 'combo',
