@@ -3,7 +3,8 @@
 use std::io::prelude::*;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Mutex;
+use std::sync::{Mutex, Once};
+use futures::prelude::*;
 
 use gst::glib::once_cell::sync::Lazy;
 use gst::glib::Properties;
@@ -12,7 +13,7 @@ use gst::prelude::*;
 use gst::subclass::prelude::*;
 use gst_base::{prelude::*, subclass::prelude::*};
 
-use super::{pool, PooledPlayBin};
+use super::{pool::{self, RUNTIME}, PooledPlayBin};
 
 #[derive(Debug)]
 struct Settings {
@@ -36,7 +37,6 @@ struct State {
     playbin: Option<PooledPlayBin>,
     bus_message_sigid: Option<glib::SignalHandlerId>,
     source_setup_sigid: Option<glib::SignalHandlerId>,
-    start_completed: bool,
 
     segment: Option<gst::Segment>,
     seek_event: Option<gst::Event>,
@@ -69,6 +69,7 @@ pub struct PlaybinPoolSrc {
         blurb = "Generate a dot file of the underlying pipeline and return its file path")
     ]
     state: Mutex<State>,
+    start_completed: Mutex<bool>,
 
     pool: super::PlaybinPool,
 }
@@ -78,6 +79,7 @@ impl Default for PlaybinPoolSrc {
         Self {
             settings: Mutex::new(Settings::default()),
             state: Mutex::new(State::default()),
+            start_completed: Default::default(),
             pool: pool::PLAYBIN_POOL.lock().unwrap().clone(),
         }
     }
@@ -101,6 +103,72 @@ static CAT: Lazy<gst::DebugCategory> = Lazy::new(|| {
         Some("Playbin Pool Src"),
     )
 });
+
+// Same gst::bus::BusStream but hooking context message from the thread
+// where the message is posted, so that GstContext can be shared
+#[derive(Debug)]
+struct CustomBusStream {
+    bus: glib::WeakRef<gst::Bus>,
+    receiver: futures::channel::mpsc::UnboundedReceiver<gst::Message>,
+}
+
+impl CustomBusStream {
+    fn new<E>(element: &E, bus: &gst::Bus) -> Self
+            where E: IsA<gst::Element> + Send + Sync + 'static {
+        let (sender, receiver) = futures::channel::mpsc::unbounded();
+
+        let element_weak = element.downgrade();
+        bus.connect_sync_message(None, move |_, msg| {
+            match msg.view() {
+                gst::MessageView::NeedContext(..) | gst::MessageView::HaveContext(..) => {
+                    if let Some(element) = element_weak.upgrade() {
+                        let _ = element.post_message(msg.to_owned());
+                    }
+                },
+                gst::MessageView::Element(s) => {
+                    if let Some(element) = element_weak.upgrade() {
+                        if let Err(e) = element.post_message(s.message().to_owned()) {
+                            gst::warning!(CAT, obj: &element, "Failed to forward message: {e:?}");
+                        }
+                    }
+                }
+                _ => {
+                    let _ = sender.unbounded_send(msg.to_owned());
+                }
+            }
+        });
+
+        Self {
+            bus: bus.downgrade(),
+            receiver,
+        }
+    }
+}
+
+impl Drop for CustomBusStream {
+    fn drop(&mut self) {
+        if let Some(bus) = self.bus.upgrade() {
+            bus.unset_sync_handler();
+        }
+    }
+}
+
+impl futures::Stream for CustomBusStream {
+    type Item = gst::Message;
+
+    fn poll_next(
+        mut self: std::pin::Pin<&mut Self>,
+        context: &mut std::task::Context,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        self.receiver.poll_next_unpin(context)
+    }
+}
+
+impl futures::stream::FusedStream for CustomBusStream {
+    fn is_terminated(&self) -> bool {
+        self.receiver.is_terminated()
+    }
+}
 
 impl PlaybinPoolSrc {
     fn dot_pipeline(&self) -> Option<String> {
@@ -148,38 +216,44 @@ impl PlaybinPoolSrc {
         Some(fname)
     }
 
-    fn handle_bus_message(&self, _bus: &gst::Bus, message: &gst::Message) {
-        let view = message.view();
-        let (playbin, start_completed) = {
-            let state = self.state.lock().unwrap();
+    fn handle_bus_messages(&self, bus: gst::Bus, playbin: &PooledPlayBin) {
+        let obj = self.obj().clone();
+        let mut bus_stream = CustomBusStream::new(&obj, &bus);
+        let weak_playbin = playbin.downgrade();
 
-            if let Some(ref playbin) = state.playbin {
-                (playbin.clone(), state.start_completed)
-            } else {
-                gst::debug!(CAT, imp: self, "Got message {:?} without playbin", message);
-                // We have been disconnected while we already entered the
-                // callback it seems
-                return;
-            }
-        };
+        RUNTIME.spawn(async move {
+            while let Some(message) = bus_stream.next().await {
+                let view = message.view();
+                let this = obj.imp();
+                let playbin = {
+                    let state = this.state.lock().unwrap();
 
-        match view {
-            gst::MessageView::Element(s) => {
-                if let Err(e) = self.obj().post_message(s.message().to_owned()) {
-                    gst::warning!(CAT, imp: self, "Failed to forward message: {e:?}");
+                    if state.playbin == weak_playbin.upgrade() && state.playbin.is_some() {
+                        state.playbin.as_ref().unwrap().clone()
+                    } else {
+                        gst::debug!(CAT, imp: this, "Got message {:?} without playbin", message);
+                        // We have been disconnected while we already entered the
+                        // callback it seems
+                        return;
+                    }
+                };
+
+                match view {
+                    gst::MessageView::StateChanged(s) => {
+                        let mut start_completed = this.start_completed.lock().unwrap();
+
+                        if !*start_completed
+                            && s.src() == Some(playbin.pipeline().upcast_ref())
+                            && s.pending() == gst::State::VoidPending
+                        {
+                            *start_completed = true;
+                            obj.start_complete(gst::FlowReturn::Ok);
+                        }
+                    }
+                    _ => (),
                 }
             }
-            gst::MessageView::StateChanged(s) => {
-                if !start_completed
-                    && s.src() == Some(playbin.pipeline().upcast_ref())
-                    && s.pending() == gst::State::VoidPending
-                {
-                    self.state.lock().unwrap().start_completed = true;
-                    self.obj().start_complete(gst::FlowReturn::Ok);
-                }
-            }
-            _ => (),
-        }
+        });
     }
 
     /// Ensures that a `stream-start` event with the right ID has been received
@@ -414,12 +488,10 @@ impl PlaybinPoolSrc {
         let pipeline = playbin.pipeline();
         let bus = pipeline.bus().unwrap();
         bus.enable_sync_message_emission();
-        let mut state = self.state.lock().unwrap();
-        state.bus_message_sigid = Some(bus.connect_sync_message(None,
-            glib::clone!(@weak self as this => move |bus, message| this.handle_bus_message(bus, message)))
-        );
+        self.handle_bus_messages(bus, playbin);
 
         let obj = self.obj();
+        let mut state = self.state.lock().unwrap();
         state.source_setup_sigid = Some(playbin.uridecodebin().connect_closure(
             "source-setup",
             false,
@@ -693,6 +765,7 @@ impl BaseSrcImpl for PlaybinPoolSrc {
             ));
         };
 
+        let mut start_completed = self.start_completed.lock().unwrap();
         self.set_playbin(&playbin);
         let res = playbin.imp().play().map_err(|err| {
             gst::error_msg!(
@@ -702,7 +775,7 @@ impl BaseSrcImpl for PlaybinPoolSrc {
         })?;
         if res == gst::StateChangeSuccess::Success {
             gst::debug!(CAT, imp: self, "Already ready");
-            self.state.lock().unwrap().start_completed = true;
+            *start_completed = true;
             self.obj().start_complete(gst::FlowReturn::Ok);
         } else {
             let settings = self.settings.lock().unwrap();
@@ -818,9 +891,10 @@ impl BaseSrcImpl for PlaybinPoolSrc {
             }
             pipeline.bus().unwrap().disable_sync_message_emission();
 
-            state.start_completed = false;
             state.playbin.take().unwrap()
         };
+
+        *self.start_completed.lock().unwrap() = false;
         gst::info!(CAT, imp: self, "Releasing {pipeline:?}");
         self.pool.release(pipeline);
 
