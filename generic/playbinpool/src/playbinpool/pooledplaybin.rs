@@ -100,7 +100,17 @@ impl PooledPlayBin {
         }
 
         if let Err(err) = pad.link(&sinkpad) {
-            gst::error!(CAT, imp: self, "Failed to link pads: {:?}", err);
+            if self.state.lock().unwrap().bus_message_sigid.is_none() {
+                gst::debug!(CAT, imp: self, "Pad added but no stream selected anymore");
+
+                return;
+            }
+            gst::error!(CAT, imp: self, "Failed link pads {:?}:{:?}: {:#?}\n -> {:?}:{}: {:#?} \n: {:?}",
+                pad.parent().map(|p| p.name()), pad.name(),
+                pad.query_caps(None),
+                sinkpad.parent().map(|p| p.name()), sinkpad.name(),
+                sinkpad.query_caps(None),
+                err);
         }
     }
 
