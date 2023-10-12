@@ -120,12 +120,18 @@ impl PooledPlayBin {
 
                 return;
             }
-            gst::error!(CAT, imp: self, "Failed link pads {:?}:{:?}: {:#?}\n -> {:?}:{}: {:#?} \n: {:?}",
-                pad.parent().map(|p| p.name()), pad.name(),
+            gst::error!(
+                CAT,
+                imp: self,
+                "Failed link pads {:?}:{:?}: {:#?}\n -> {:?}:{}: {:#?} \n: {:?}",
+                pad.parent().map(|p| p.name()),
+                pad.name(),
                 pad.query_caps(None),
-                sinkpad.parent().map(|p| p.name()), sinkpad.name(),
+                sinkpad.parent().map(|p| p.name()),
+                sinkpad.name(),
                 sinkpad.query_caps(None),
-                err);
+                err
+            );
         }
     }
 
