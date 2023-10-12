@@ -61,8 +61,9 @@ impl PooledPlayBin {
         uri: &str,
         caps: &gst::Caps,
         stream_id: Option<&str>,
+        pool: &PlaybinPool,
     ) -> PooledPlayBin {
-        let this: PooledPlayBin = glib::Object::new();
+        let this: PooledPlayBin = glib::Object::builder().property("pool", pool).build();
 
         this.reset(uri, caps, stream_id);
 

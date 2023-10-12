@@ -32,12 +32,14 @@ static DEFAULT_CLEANUP_TIMEOUT_SEC: u64 = 15;
 #[derive(Debug)]
 struct Settings {
     cleanup_timeout: std::time::Duration,
+    bus: Option<gst::Bus>,
 }
 
 impl Default for Settings {
     fn default() -> Self {
         Settings {
             cleanup_timeout: std::time::Duration::from_secs(DEFAULT_CLEANUP_TIMEOUT_SEC),
+            bus: None,
         }
     }
 }
@@ -67,6 +69,7 @@ pub struct PlaybinPool {
         set = Self::set_cleanup_timeout,
         type = u64,
         member = cleanup_timeout)]
+    #[property(name="bus", get, set, type = Option<gst::Bus>, member = bus)]
     settings: Mutex<Settings>,
 }
 
@@ -276,7 +279,7 @@ impl PlaybinPool {
             || {
                 gst::debug!(CAT, "Starting new pipeline");
 
-                let pipeline = PooledPlayBin::new(uri.as_ref(), &caps, stream_id.as_deref());
+                let pipeline = PooledPlayBin::new(uri.as_ref(), &caps, stream_id.as_deref(), &*self.obj());
                 let obj = self.obj();
                 let mut outstandings = self.outstandings.n.lock().unwrap();
                 *outstandings += 1;

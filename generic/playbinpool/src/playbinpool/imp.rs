@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: MPL-2.0
 
+use futures::prelude::*;
 use std::io::prelude::*;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Mutex, Once};
-use futures::prelude::*;
 
 use gst::glib::once_cell::sync::Lazy;
 use gst::glib::Properties;
@@ -13,7 +13,10 @@ use gst::prelude::*;
 use gst::subclass::prelude::*;
 use gst_base::{prelude::*, subclass::prelude::*};
 
-use super::{pool::{self, RUNTIME}, PooledPlayBin};
+use super::{
+    pool::{self, RUNTIME},
+    PooledPlayBin,
+};
 
 #[derive(Debug)]
 struct Settings {
@@ -114,30 +117,17 @@ struct CustomBusStream {
     receiver: futures::channel::mpsc::UnboundedReceiver<gst::Message>,
 }
 
+// FIXME - We do not need CustomBusStream anymore, use a simple bus stream instead
 impl CustomBusStream {
     fn new<E>(element: &E, bus: &gst::Bus) -> Self
-            where E: IsA<gst::Element> + Send + Sync + 'static {
+    where
+        E: IsA<gst::Element> + Send + Sync + 'static,
+    {
         let (sender, receiver) = futures::channel::mpsc::unbounded();
 
         let element_weak = element.downgrade();
         bus.connect_sync_message(None, move |_, msg| {
-            match msg.view() {
-                gst::MessageView::NeedContext(..) | gst::MessageView::HaveContext(..) => {
-                    if let Some(element) = element_weak.upgrade() {
-                        let _ = element.post_message(msg.to_owned());
-                    }
-                },
-                gst::MessageView::Element(s) => {
-                    if let Some(element) = element_weak.upgrade() {
-                        if let Err(e) = element.post_message(s.message().to_owned()) {
-                            gst::warning!(CAT, obj: &element, "Failed to forward message: {e:?}");
-                        }
-                    }
-                }
-                _ => {
-                    let _ = sender.unbounded_send(msg.to_owned());
-                }
-            }
+            let _ = sender.unbounded_send(msg.to_owned());
         });
 
         Self {
@@ -389,11 +379,7 @@ impl PlaybinPoolSrc {
                     }
 
                     if self.state.lock().unwrap().flushing {
-                        gst::debug!(
-                            CAT,
-                            imp: self,
-                            "Flushing"
-                        );
+                        gst::debug!(CAT, imp: self, "Flushing");
                         return Err(gst::FlowError::Flushing);
                     }
 
@@ -446,19 +432,22 @@ impl PlaybinPoolSrc {
                         return return_func(self, c.caps().to_owned().upcast());
                     } else {
                         gst::debug!(CAT, imp: self, "Pushing new caps downstream");
-                        self.obj().upcast_ref::<gst_base::BaseSrc>().set_caps(&c.caps().to_owned()).map_err(|e| {
-                            if self
-                                .obj()
-                                .src_pad()
-                                .pad_flags()
-                                .contains(gst::PadFlags::FLUSHING)
-                            {
-                                gst::FlowError::Flushing
-                            } else {
-                                gst::error!(CAT, "Could not set caps: {e:?}");
-                                gst::FlowError::NotNegotiated
-                            }
-                        })?;
+                        self.obj()
+                            .upcast_ref::<gst_base::BaseSrc>()
+                            .set_caps(&c.caps().to_owned())
+                            .map_err(|e| {
+                                if self
+                                    .obj()
+                                    .src_pad()
+                                    .pad_flags()
+                                    .contains(gst::PadFlags::FLUSHING)
+                                {
+                                    gst::FlowError::Flushing
+                                } else {
+                                    gst::error!(CAT, "Could not set caps: {e:?}");
+                                    gst::FlowError::NotNegotiated
+                                }
+                            })?;
                     }
                 }
             } else if obj.type_().is_a(gst::Sample::static_type()) {
@@ -643,9 +632,9 @@ impl GstObjectImpl for PlaybinPoolSrc {}
 
 impl ElementImpl for PlaybinPoolSrc {
     fn send_event(&self, event: gst::Event) -> bool {
-        gst::error!(CAT, imp: self, "Got event {event:?}");
+        gst::log!(CAT, imp: self, "Got event {event:?}");
         if let gst::EventView::Seek(s) = event.view() {
-            gst::error!(CAT, imp: self, "Seeking {s:?}");
+            gst::info!(CAT, imp: self, "Seeking {s:?}");
 
             self.state.lock().unwrap().seek_event = Some(event.clone());
         }
@@ -825,7 +814,9 @@ impl BaseSrcImpl for PlaybinPoolSrc {
         };
 
         gst::debug!(CAT, imp: self, "Negotiated caps: {:?}", caps);
-        self.obj().upcast_ref::<gst_base::BaseSrc>().set_caps(&caps)
+        self.obj()
+            .upcast_ref::<gst_base::BaseSrc>()
+            .set_caps(&caps)
             .map_err(|_| gst::loggable_error!(CAT, "Failed to negotiate caps",))
     }
 
@@ -922,7 +913,7 @@ impl BaseSrcImpl for PlaybinPoolSrc {
                 if s.structure()
                     .map_or(false, |s| s.name().as_str() == "can-seek-in-null")
                 {
-                    gst::error!(CAT, "Can seek in NULL");
+                    gst::info!(CAT, "Marking as seekable in NULL");
                     s.structure_mut().set("res", true);
 
                     return true;

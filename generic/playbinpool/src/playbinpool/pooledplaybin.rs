@@ -1,6 +1,11 @@
 use std::sync::Mutex;
 
-use gst::{glib, glib::once_cell::sync::Lazy, prelude::*, subclass::prelude::*};
+use gst::{
+    glib::once_cell::sync::Lazy,
+    glib::{self, Properties},
+    prelude::*,
+    subclass::prelude::*,
+};
 
 use super::pool::CAT;
 
@@ -13,13 +18,20 @@ struct State {
     bus_message_sigid: Option<glib::SignalHandlerId>,
 
     target_src: Option<super::PlaybinPoolSrc>,
+
+    pool: Option<super::PlaybinPool>,
 }
 
+#[derive(Properties, Debug)]
+#[properties(wrapper_type = super::PooledPlayBin)]
 pub struct PooledPlayBin {
     pub pipeline: gst::Pipeline,
     pub uridecodebin: gst::Element,
     pub sink: gst_app::AppSink,
+
+    #[property(name="pool", set, get, type = super::PlaybinPool, construct_only, member = pool)]
     state: Mutex<State>,
+
     // Working around https://gitlab.freedesktop.org/gstreamer/gstreamer/-/issues/150 by
     // ensuring we do not send `SELECT_STREAM` while tearing down
     state_lock: Mutex<bool>,
@@ -79,6 +91,7 @@ impl Default for PooledPlayBin {
                     .build(),
                 bus_message_sigid: None,
                 target_src: None,
+                pool: None,
             }),
             state_lock: Mutex::new(false),
             name,
@@ -252,6 +265,23 @@ impl PooledPlayBin {
                         .unwrap()
                         .as_str()]));
             }
+        } else if matches!(
+            message.view(),
+            gst::MessageView::NeedContext(..)
+                | gst::MessageView::HaveContext(..)
+                | gst::MessageView::Element(..)
+        ) {
+            if let Some(bus) = self.obj().pool().bus() {
+                gst::debug!(CAT, imp: self, "Posting context message to the pool bus");
+                if let Err(e) = bus.post(message.to_owned()) {
+                    gst::warning!(CAT, imp: self, "Could not post message {message:?}: {e:?}");
+                }
+            } else if let Some(target) = self.target_src() {
+                gst::debug!(CAT, imp: self, "Posting context message to {target:?}");
+                if let Err(e) = target.post_message(message.to_owned()) {
+                    gst::warning!(CAT, imp: self, "Could not post message {message:?}: {e:?}");
+                }
+            }
         }
     }
 
@@ -333,6 +363,18 @@ impl PooledPlayBin {
 }
 
 impl ObjectImpl for PooledPlayBin {
+    fn properties() -> &'static [glib::ParamSpec] {
+        Self::derived_properties()
+    }
+
+    fn set_property(&self, id: usize, value: &glib::Value, pspec: &glib::ParamSpec) {
+        self.derived_set_property(id, value, pspec)
+    }
+
+    fn property(&self, id: usize, pspec: &glib::ParamSpec) -> glib::Value {
+        self.derived_property(id, pspec)
+    }
+
     fn signals() -> &'static [glib::subclass::Signal] {
         static SIGNALS: Lazy<Vec<glib::subclass::Signal>> =
             Lazy::new(|| vec![glib::subclass::Signal::builder("released").build()]);
