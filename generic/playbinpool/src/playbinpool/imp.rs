@@ -404,7 +404,7 @@ impl PlaybinPoolSrc {
                                 gst::info!(
                                     CAT,
                                     imp: self,
-                                    "Got FLUSH_STOP with right seqnum, restarting pushing buffers"
+                                    "Got FLUSH_STOP with right seqnum {seq:?}, restarting pushing buffers"
                                 );
                                 let _ = state.seek_seqnum.take();
                             } else {
@@ -734,12 +734,10 @@ impl BaseSrcImpl for PlaybinPoolSrc {
                 CAT,
                 imp: self,
                 "Sending {seek_event:?} to {}",
-                pipeline.name()
+                playbin.imp().name()
             );
-            if !pipeline.send_event(seek_event) {
-                gst::error!(CAT, imp: self, "Failed to seek");
-                return false;
-            }
+
+            playbin.imp().seek(seek_event);
             true
         } else {
             gst::info!(CAT, imp: self, "No pipeline to seek");

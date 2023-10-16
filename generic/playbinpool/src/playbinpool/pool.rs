@@ -279,7 +279,8 @@ impl PlaybinPool {
             || {
                 gst::debug!(CAT, "Starting new pipeline");
 
-                let pipeline = PooledPlayBin::new(uri.as_ref(), &caps, stream_id.as_deref(), &*self.obj());
+                let pipeline =
+                    PooledPlayBin::new(uri.as_ref(), &caps, stream_id.as_deref(), &*self.obj());
                 let obj = self.obj();
                 let mut outstandings = self.outstandings.n.lock().unwrap();
                 *outstandings += 1;

@@ -7,7 +7,7 @@ use gst::{
     subclass::prelude::*,
 };
 
-use super::pool::CAT;
+use super::pool::{CAT, RUNTIME};
 
 #[derive(Debug)]
 struct State {
@@ -18,6 +18,7 @@ struct State {
     bus_message_sigid: Option<glib::SignalHandlerId>,
 
     target_src: Option<super::PlaybinPoolSrc>,
+    pending_seek: Option<gst::Event>,
 
     pool: Option<super::PlaybinPool>,
 }
@@ -92,6 +93,7 @@ impl Default for PooledPlayBin {
                 bus_message_sigid: None,
                 target_src: None,
                 pool: None,
+                pending_seek: None,
             }),
             state_lock: Mutex::new(false),
             name,
@@ -193,101 +195,164 @@ impl PooledPlayBin {
         self.set_uri(uri);
     }
 
-    fn handle_bus_message(&self, message: &gst::Message) {
-        if let gst::MessageView::StreamCollection(s) = message.view() {
-            let collection = s.stream_collection();
+    pub fn seek(&self, seek_event: gst::Event) -> bool {
+        let pipeline = {
+            let mut state = self.state.lock().unwrap();
 
-            let stream = if let Some(ref wanted_stream_id) = self.requested_stream_id() {
-                if let Some(stream) = collection.iter().find(|stream| {
-                    let stream_id = stream.stream_id();
-                    stream_id.map_or(false, |s| wanted_stream_id.as_str() == s.as_str())
+            let states = self.pipeline.state(Some(gst::ClockTime::from_seconds(0)));
+            gst::debug!(CAT, imp: self, "{:?} Current state: {:?}", state.target_src,
+                        states.0);
+            match states.0 {
+                Ok(_) => {
+                    if states.1 != gst::State::Playing {
+                        gst::error!(
+                            CAT,
+                            imp: self,
+                            "Waiting for pipeline to preroll before seeking it"
+                        );
+
+                        state.pending_seek = Some(seek_event);
+                        return true;
+                    }
+                }
+                Err(e) => {
+                    gst::error!(CAT, imp: self, "Failed to get current state: {e:?}");
+
+                    return false;
+                }
+            }
+
+            self.pipeline.clone()
+        };
+
+        gst::info!(CAT, "Sending seek {:?}!", seek_event.seqnum());
+        if !pipeline.send_event(seek_event) {
+            gst::error!(CAT, imp: self, "Failed to seek");
+            return false;
+        }
+
+        true
+    }
+
+    fn handle_bus_message(&self, message: &gst::Message) {
+        match message.view() {
+            gst::MessageView::StreamCollection(s) => {
+                let collection = s.stream_collection();
+
+                let stream = if let Some(ref wanted_stream_id) = self.requested_stream_id() {
+                    if let Some(stream) = collection.iter().find(|stream| {
+                        let stream_id = stream.stream_id();
+                        stream_id.map_or(false, |s| wanted_stream_id.as_str() == s.as_str())
+                    }) {
+                        gst::debug!(
+                            CAT,
+                            imp: self,
+                            "{:?} Selecting specified stream: {:?}",
+                            self.name,
+                            wanted_stream_id
+                        );
+
+                        Some(stream)
+                    } else {
+                        gst::warning!(
+                            CAT,
+                            imp: self,
+                            "{:?} requested stream {} not found in {} - available: {:?}",
+                            self.name,
+                            wanted_stream_id,
+                            self.uridecodebin().property::<String>("uri"),
+                            collection
+                                .iter()
+                                .map(|s| s.stream_id().to_owned())
+                                .collect::<Vec<Option<glib::GString>>>()
+                        );
+
+                        None
+                    }
+                } else {
+                    None
+                };
+
+                let stream = if let Some(stream) = stream {
+                    stream
+                } else if let Some(stream) = collection.iter().find(|stream| {
+                    stream.stream_type() == self.stream_type() && stream.stream_id().is_some()
                 }) {
                     gst::debug!(
                         CAT,
                         imp: self,
-                        "{:?} Selecting specified stream: {:?}",
+                        "{:?} Selecting stream: {:?}",
                         self.name,
-                        wanted_stream_id
+                        stream.stream_id()
                     );
-
-                    Some(stream)
+                    stream
                 } else {
-                    gst::warning!(
+                    /* FIXME --- Post an error on the bus! */
+                    gst::error!(
                         CAT,
                         imp: self,
-                        "{:?} requested stream {} not found in {} - available: {:?}",
+                        "{:?} No stream found for caps: {:?}",
                         self.name,
-                        wanted_stream_id,
-                        self.uridecodebin().property::<String>("uri"),
-                        collection
-                            .iter()
-                            .map(|s| s.stream_id().to_owned())
-                            .collect::<Vec<Option<glib::GString>>>()
+                        self.caps()
                     );
 
-                    None
-                }
-            } else {
-                None
-            };
+                    return;
+                };
 
-            let stream = if let Some(stream) = stream {
-                stream
-            } else if let Some(stream) = collection.iter().find(|stream| {
-                stream.stream_type() == self.stream_type() && stream.stream_id().is_some()
-            }) {
-                gst::debug!(
-                    CAT,
-                    imp: self,
-                    "{:?} Selecting stream: {:?}",
-                    self.name,
-                    stream.stream_id()
-                );
-                stream
-            } else {
-                /* FIXME --- Post an error on the bus! */
-                gst::error!(
-                    CAT,
-                    imp: self,
-                    "{:?} No stream found for caps: {:?}",
-                    self.name,
-                    self.caps()
-                );
+                let _ = self.state.lock().unwrap().stream.insert(stream.clone());
+                let uridecodebin = self.uridecodebin();
 
-                return;
-            };
-
-            let _ = self.state.lock().unwrap().stream.insert(stream.clone());
-            let uridecodebin = self.uridecodebin();
-
-            if let Ok(_state_lock) = self.state_lock.try_lock() {
-                message
-                    .src()
-                    .unwrap_or_else(|| uridecodebin.upcast_ref::<gst::Object>())
-                    .downcast_ref::<gst::Element>()
-                    .unwrap()
-                    .send_event(gst::event::SelectStreams::new(&[stream
-                        .stream_id()
+                if let Ok(_state_lock) = self.state_lock.try_lock() {
+                    message
+                        .src()
+                        .unwrap_or_else(|| uridecodebin.upcast_ref::<gst::Object>())
+                        .downcast_ref::<gst::Element>()
                         .unwrap()
-                        .as_str()]));
+                        .send_event(gst::event::SelectStreams::new(&[stream
+                            .stream_id()
+                            .unwrap()
+                            .as_str()]));
+                }
             }
-        } else if matches!(
-            message.view(),
             gst::MessageView::NeedContext(..)
-                | gst::MessageView::HaveContext(..)
-                | gst::MessageView::Element(..)
-        ) {
-            if let Some(bus) = self.obj().pool().bus() {
-                gst::debug!(CAT, imp: self, "Posting context message to the pool bus");
-                if let Err(e) = bus.post(message.to_owned()) {
-                    gst::warning!(CAT, imp: self, "Could not post message {message:?}: {e:?}");
-                }
-            } else if let Some(target) = self.target_src() {
-                gst::debug!(CAT, imp: self, "Posting context message to {target:?}");
-                if let Err(e) = target.post_message(message.to_owned()) {
-                    gst::warning!(CAT, imp: self, "Could not post message {message:?}: {e:?}");
+            | gst::MessageView::HaveContext(..)
+            | gst::MessageView::Element(..) => {
+                if let Some(bus) = self.obj().pool().bus() {
+                    gst::debug!(CAT, imp: self, "Posting context message to the pool bus");
+                    if let Err(e) = bus.post(message.to_owned()) {
+                        gst::warning!(CAT, imp: self, "Could not post message {message:?}: {e:?}");
+                    }
+                } else if let Some(target) = self.target_src() {
+                    gst::debug!(CAT, imp: self, "Posting context message to {target:?}");
+                    if let Err(e) = target.post_message(message.to_owned()) {
+                        gst::warning!(CAT, imp: self, "Could not post message {message:?}: {e:?}");
+                    }
                 }
             }
+            gst::MessageView::StateChanged(s) => {
+                if s.src()
+                    .map_or(false, |s| s == self.pipeline.upcast_ref::<gst::Object>())
+                {
+                    if s.current() == gst::State::Playing {
+                        if let Some(seek_event) = self.state.lock().unwrap().pending_seek.take() {
+                            let pipeline = self.pipeline();
+
+                            gst::debug!(CAT, imp: self, "Scheduling sending pending seek event");
+                            RUNTIME.spawn(async move {
+                                if !pipeline.send_event(seek_event) {
+                                    if let Err(e) = pipeline.post_message(gst::message::Error::new(
+                                        gst::CoreError::Failed,
+                                        "Failed to seek",
+                                    )) {
+                                        gst::error!(CAT, "Failed to post error message: {e:?}");
+                                    }
+                                }
+                            });
+                        }
+                    }
+                }
+            }
+            _ => (),
         }
     }
 
