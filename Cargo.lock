@@ -2565,6 +2565,7 @@ dependencies = [
  "gstreamer",
  "gstreamer-app",
  "gstreamer-base",
+ "once_cell",
  "tokio",
  "url",
 ]

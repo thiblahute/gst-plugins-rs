@@ -3,10 +3,11 @@
 use std::sync::{Condvar, Mutex, MutexGuard};
 
 use gst::{
-    glib::{self, once_cell::sync::Lazy, Properties},
+    glib::{self, Properties},
     prelude::*,
     subclass::prelude::*,
 };
+use once_cell::sync::Lazy;
 use tokio::runtime;
 
 use super::PooledPlayBin;

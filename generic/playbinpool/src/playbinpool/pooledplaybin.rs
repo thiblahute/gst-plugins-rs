@@ -1,11 +1,11 @@
 use std::sync::Mutex;
 
 use gst::{
-    glib::once_cell::sync::Lazy,
     glib::{self, Properties},
     prelude::*,
     subclass::prelude::*,
 };
+use once_cell::sync::Lazy;
 
 use super::pool::{CAT, RUNTIME};
 

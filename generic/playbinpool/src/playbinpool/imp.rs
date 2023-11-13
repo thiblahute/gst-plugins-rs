@@ -6,12 +6,12 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Mutex, Once};
 
-use gst::glib::once_cell::sync::Lazy;
 use gst::glib::Properties;
 use gst::glib::{self, ParamSpec, Value};
 use gst::prelude::*;
 use gst::subclass::prelude::*;
 use gst_base::{prelude::*, subclass::prelude::*};
+use once_cell::sync::Lazy;
 
 use super::{
     pool::{self, RUNTIME},
@@ -109,15 +109,14 @@ static CAT: Lazy<gst::DebugCategory> = Lazy::new(|| {
     )
 });
 
-// Same gst::bus::BusStream but hooking context message from the thread
-// where the message is posted, so that GstContext can be shared
+// Same gst::bus::BusStream but not dropping messages so other handlers
+// can be set
 #[derive(Debug)]
 struct CustomBusStream {
     bus: glib::WeakRef<gst::Bus>,
     receiver: futures::channel::mpsc::UnboundedReceiver<gst::Message>,
 }
 
-// FIXME - We do not need CustomBusStream anymore, use a simple bus stream instead
 impl CustomBusStream {
     fn new(bus: &gst::Bus) -> Self {
         let (sender, receiver) = futures::channel::mpsc::unbounded();
