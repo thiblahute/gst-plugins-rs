@@ -332,23 +332,22 @@ impl PooledPlayBin {
             gst::MessageView::StateChanged(s) => {
                 if s.src()
                     .map_or(false, |s| s == self.pipeline.upcast_ref::<gst::Object>())
+                    && s.current() == gst::State::Playing
                 {
-                    if s.current() == gst::State::Playing {
-                        if let Some(seek_event) = self.state.lock().unwrap().pending_seek.take() {
-                            let pipeline = self.pipeline();
+                    if let Some(seek_event) = self.state.lock().unwrap().pending_seek.take() {
+                        let pipeline = self.pipeline();
 
-                            gst::debug!(CAT, imp: self, "Scheduling sending pending seek event");
-                            RUNTIME.spawn(async move {
-                                if !pipeline.send_event(seek_event) {
-                                    if let Err(e) = pipeline.post_message(gst::message::Error::new(
-                                        gst::CoreError::Failed,
-                                        "Failed to seek",
-                                    )) {
-                                        gst::error!(CAT, "Failed to post error message: {e:?}");
-                                    }
+                        gst::debug!(CAT, imp: self, "Scheduling sending pending seek event");
+                        RUNTIME.spawn(async move {
+                            if !pipeline.send_event(seek_event) {
+                                if let Err(e) = pipeline.post_message(gst::message::Error::new(
+                                    gst::CoreError::Failed,
+                                    "Failed to seek",
+                                )) {
+                                    gst::error!(CAT, "Failed to post error message: {e:?}");
                                 }
-                            });
-                        }
+                            }
+                        });
                     }
                 }
             }

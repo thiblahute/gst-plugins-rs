@@ -125,7 +125,6 @@ impl CustomBusStream {
     {
         let (sender, receiver) = futures::channel::mpsc::unbounded();
 
-        let element_weak = element.downgrade();
         bus.connect_sync_message(None, move |_, msg| {
             let _ = sender.unbounded_send(msg.to_owned());
         });
@@ -364,7 +363,7 @@ impl PlaybinPoolSrc {
                                     imp: self,
                                     "Pushing segment before returning EOS so downstream has the right seqnum");
 
-                                self.obj().push_segment(&segment.segment());
+                                self.obj().push_segment(segment.segment());
                             } else {
                                 gst::debug!(CAT, imp: self, "Sticky segment not found!");
                                 if let Some(seek_segment) = seek_segment {
@@ -711,8 +710,6 @@ impl BaseSrcImpl for PlaybinPoolSrc {
         drop(state);
 
         if let Some(playbin) = playbin {
-            let pipeline = playbin.pipeline();
-
             gst::info!(CAT, imp: self, "Seeking to {segment:?}");
             if let gst::EventView::Seek(s) = seek_event.view() {
                 let values = s.get();
