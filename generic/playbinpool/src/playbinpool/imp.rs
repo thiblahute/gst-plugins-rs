@@ -119,10 +119,7 @@ struct CustomBusStream {
 
 // FIXME - We do not need CustomBusStream anymore, use a simple bus stream instead
 impl CustomBusStream {
-    fn new<E>(element: &E, bus: &gst::Bus) -> Self
-    where
-        E: IsA<gst::Element> + Send + Sync + 'static,
-    {
+    fn new(bus: &gst::Bus) -> Self {
         let (sender, receiver) = futures::channel::mpsc::unbounded();
 
         bus.connect_sync_message(None, move |_, msg| {
@@ -209,7 +206,7 @@ impl PlaybinPoolSrc {
 
     fn handle_bus_messages(&self, bus: gst::Bus, playbin: &PooledPlayBin) {
         let obj = self.obj().clone();
-        let mut bus_stream = CustomBusStream::new(&obj, &bus);
+        let mut bus_stream = CustomBusStream::new(&bus);
         let weak_playbin = playbin.downgrade();
 
         RUNTIME.spawn(async move {
