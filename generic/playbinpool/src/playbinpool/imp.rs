@@ -237,6 +237,12 @@ impl PlaybinPoolSrc {
                             obj.start_complete(gst::FlowReturn::Ok);
                         }
                     }
+                    gst::MessageView::Error(s) => {
+                        gst::error!(CAT, obj: obj, "Got error message: {s}");
+                        if let Err(e) = obj.post_message(s.message().to_owned()) {
+                            gst::error!(CAT, "Could not post error message: {e:?}");
+                        }
+                    }
                     _ => (),
                 }
             }
