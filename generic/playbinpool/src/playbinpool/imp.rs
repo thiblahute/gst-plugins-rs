@@ -344,34 +344,43 @@ impl PlaybinPoolSrc {
                     // Handle the case where the sink changed it EOS state
                     // between the pull and now
                     if is_eos || sink.is_eos() {
-                        let state = self.state.lock().unwrap();
+                        let mut state = self.state.lock().unwrap();
                         if state.seek_seqnum.is_some() {
                             gst::debug!(CAT, imp: self, "Got EOS while waiting for FLUSH_STOP");
                             continue;
                         }
 
                         if state.needs_segment {
-                            let seek_segment = state.seek_segment.clone();
-                            drop(state);
-
                             gst::debug!(CAT, imp: self, "Needs segment!");
-                            if let Some(segment) = sink
-                                .sink_pads()
-                                .get(0)
-                                .unwrap()
-                                .sticky_event::<gst::event::Segment>(0)
-                            {
-                                gst::debug!(CAT,
-                                    imp: self,
-                                    "Pushing segment before returning EOS so downstream has the right seqnum");
+                            let segment =
+                                sink
+                                    .sink_pads()
+                                    .get(0)
+                                    .unwrap()
+                                    .sticky_event::<gst::event::Segment>(0)
+                                    .map_or_else(|| {
+                                        gst::info!(CAT, imp: self, "Sticky segment not found, pushing original seek segment");
 
-                                self.obj().push_segment(segment.segment());
+                                        state.seek_segment.clone()
+                                    }, |segment| {
+                                        let segment = segment.segment().clone();
+
+                                        gst::info!(CAT,
+                                            imp: self,
+                                            "Pushing segment {segment:#?} before returning EOS so downstream has the right seqnum");
+
+                                        Some(segment)
+                                    });
+
+                            if let Some(segment) = segment {
+                                // Ensure we push the right segment
+                                state.segment = Some(segment.clone());
+
+                                drop(state);
+
+                                self.obj().push_segment(&segment);
                             } else {
-                                gst::debug!(CAT, imp: self, "Sticky segment not found!");
-                                if let Some(seek_segment) = seek_segment {
-                                    gst::debug!(CAT, imp: self, "Pushing original seek segment");
-                                    self.obj().push_segment(&seek_segment);
-                                }
+                                gst::warning!(CAT, imp: self, "No segment to push before EOS");
                             }
                         }
 
