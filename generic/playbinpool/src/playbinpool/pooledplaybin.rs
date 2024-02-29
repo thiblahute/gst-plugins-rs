@@ -16,6 +16,7 @@ struct State {
     caps: gst::Caps,
     unused_since: Option<std::time::Instant>,
     bus_message_sigid: Option<glib::SignalHandlerId>,
+    stream_selection_seqnum: gst::Seqnum,
 
     target_src: Option<super::PlaybinPoolSrc>,
     pending_seek: Option<gst::Event>,
@@ -90,6 +91,7 @@ impl Default for PooledPlayBin {
                 caps: gst::Caps::builder_full()
                     .structure_with_any_features(gst::Structure::new_empty("video/x-raw"))
                     .build(),
+                stream_selection_seqnum: gst::Seqnum::next(),
                 bus_message_sigid: None,
                 target_src: None,
                 pool: None,
@@ -179,6 +181,7 @@ impl PooledPlayBin {
         state.stream = None;
         state.caps = caps.clone();
         state.stream_id = stream_id.map(|s| s.to_string());
+        state.stream_selection_seqnum = gst::Seqnum::next();
         self.uridecodebin.set_property("caps", caps);
         self.sink.set_property("caps", caps);
 
@@ -299,7 +302,12 @@ impl PooledPlayBin {
                     return;
                 };
 
-                let _ = self.state.lock().unwrap().stream.insert(stream.clone());
+                let seqnum = {
+                    let mut state = self.state.lock().unwrap();
+                    let _ = state.stream.insert(stream.clone());
+
+                    state.stream_selection_seqnum.clone()
+                };
                 let uridecodebin = self.uridecodebin();
 
                 if let Ok(_state_lock) = self.state_lock.try_lock() {
@@ -308,10 +316,14 @@ impl PooledPlayBin {
                         .unwrap_or_else(|| uridecodebin.upcast_ref::<gst::Object>())
                         .downcast_ref::<gst::Element>()
                         .unwrap()
-                        .send_event(gst::event::SelectStreams::new(&[stream
-                            .stream_id()
-                            .unwrap()
-                            .as_str()]));
+                        .send_event(
+                            gst::event::SelectStreams::builder(&[stream
+                                .stream_id()
+                                .unwrap()
+                                .as_str()])
+                            .seqnum(seqnum)
+                            .build(),
+                        );
                 }
             }
             gst::MessageView::NeedContext(..)
@@ -397,6 +409,7 @@ impl PooledPlayBin {
         self.pipeline.call_async(move |pipeline| {
             let this = obj.imp();
             let state_lock = this.state_lock.lock();
+            this.state.lock().unwrap().stream_selection_seqnum = gst::Seqnum::next();
             if let Err(err) = pipeline.set_state(gst::State::Null) {
                 gst::error!(CAT, imp: this, "Could not teardown pipeline {err:?}");
             } else {
