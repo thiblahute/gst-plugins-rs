@@ -6,7 +6,7 @@ use gst::subclass::prelude::*;
 
 mod imp;
 mod pool;
-mod pooledplaybin;
+mod decoderpipeline;
 
 glib::wrapper! {
     pub struct PlaybinPoolSrc(ObjectSubclass<imp::PlaybinPoolSrc>)
@@ -19,20 +19,20 @@ glib::wrapper! {
 }
 
 impl PlaybinPool {
-    pub(crate) fn get_playbin(&self, src: &PlaybinPoolSrc) -> PooledPlayBin {
+    pub(crate) fn get_decoderpipe(&self, src: &PlaybinPoolSrc) -> DecoderPipeline {
         self.imp().get(src)
     }
 
-    pub(crate) fn release(&self, playbin: PooledPlayBin) {
-        self.imp().release(playbin)
+    pub(crate) fn release(&self, decoderpipe: DecoderPipeline) {
+        self.imp().release(decoderpipe)
     }
 }
 
 glib::wrapper! {
-    pub struct PooledPlayBin(ObjectSubclass<pooledplaybin::PooledPlayBin>);
+    pub struct DecoderPipeline(ObjectSubclass<decoderpipeline::DecoderPipeline>);
 }
 
-impl PooledPlayBin {
+impl DecoderPipeline {
     pub(crate) fn requested_stream_id(&self) -> Option<String> {
         self.imp().requested_stream_id()
     }
@@ -62,8 +62,8 @@ impl PooledPlayBin {
         caps: &gst::Caps,
         stream_id: Option<&str>,
         pool: &PlaybinPool,
-    ) -> PooledPlayBin {
-        let this: PooledPlayBin = glib::Object::builder().property("pool", pool).build();
+    ) -> DecoderPipeline {
+        let this: DecoderPipeline = glib::Object::builder().property("pool", pool).build();
 
         this.reset(uri, caps, stream_id);
 
@@ -74,7 +74,7 @@ impl PooledPlayBin {
 pub fn register(plugin: &gst::Plugin) -> Result<(), glib::BoolError> {
     gst::Element::register(
         Some(plugin),
-        "playbinpoolsrc",
+        "uridecodepoolsrc",
         gst::Rank::NONE,
         PlaybinPoolSrc::static_type(),
     )

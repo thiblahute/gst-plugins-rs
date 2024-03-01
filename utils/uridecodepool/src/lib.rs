@@ -3,21 +3,21 @@
 #![allow(clippy::non_send_fields_in_send_ty, unused_doc_comments)]
 
 /**
- * plugin-playbinpool:
+ * plugin-uridecodepool:
  *
- * Since: plugins-rs-0.1.0
+ * Since: plugins-rs-0.13.0
  */
 use gst::glib;
 
-mod playbinpool;
+mod uridecodepool;
 
 fn plugin_init(plugin: &gst::Plugin) -> Result<(), glib::BoolError> {
-    playbinpool::register(plugin)?;
+    uridecodepool::register(plugin)?;
     Ok(())
 }
 
 gst::plugin_define!(
-    playbinpool,
+    uridecodepool,
     env!("CARGO_PKG_DESCRIPTION"),
     plugin_init,
     concat!(env!("CARGO_PKG_VERSION"), "-", env!("COMMIT_ID")),

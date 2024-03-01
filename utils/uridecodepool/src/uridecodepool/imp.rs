@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Mutex, Once};
 
 use gst::glib::Properties;
-use gst::glib::{self, ParamSpec, Value};
+use gst::glib;
 use gst::prelude::*;
 use gst::subclass::prelude::*;
 use gst_base::{prelude::*, subclass::prelude::*};
@@ -15,7 +15,7 @@ use once_cell::sync::Lazy;
 
 use super::{
     pool::{self, RUNTIME},
-    PooledPlayBin,
+    DecoderPipeline,
 };
 
 #[derive(Debug)]
@@ -39,7 +39,7 @@ impl Default for Settings {
 
 #[derive(Debug, Default)]
 struct State {
-    playbin: Option<PooledPlayBin>,
+    decoderpipe: Option<DecoderPipeline>,
     bus_message_sigid: Option<glib::SignalHandlerId>,
     source_setup_sigid: Option<glib::SignalHandlerId>,
 
@@ -103,7 +103,7 @@ static DUMPDOT_DIR: Lazy<Option<Box<PathBuf>>> = Lazy::new(|| {
 
 static CAT: Lazy<gst::DebugCategory> = Lazy::new(|| {
     gst::DebugCategory::new(
-        "playbinpoolsrc",
+        "uridecodepoolsrc",
         gst::DebugColorFlags::empty(),
         Some("Playbin Pool Src"),
     )
@@ -165,15 +165,15 @@ impl PlaybinPoolSrc {
             return None;
         }
 
-        let playbin = match self.state.lock().unwrap().playbin.as_ref() {
-            Some(playbin) => playbin.clone(),
+        let decoderpipe = match self.state.lock().unwrap().decoderpipe.as_ref() {
+            Some(decoderpipe) => decoderpipe.clone(),
             None => {
-                gst::info!(CAT, imp: self, "No playbin to dump");
+                gst::info!(CAT, imp: self, "No decoderpipe to dump");
                 return None;
             }
         };
 
-        let pipeline = playbin.pipeline();
+        let pipeline = decoderpipe.pipeline();
         let fname = format!(
             "{}-{}-{}.dot",
             COUNTER.fetch_add(1, Ordering::SeqCst),
@@ -203,22 +203,22 @@ impl PlaybinPoolSrc {
         Some(fname)
     }
 
-    fn handle_bus_messages(&self, bus: gst::Bus, playbin: &PooledPlayBin) {
+    fn handle_bus_messages(&self, bus: gst::Bus, decoderpipe: &DecoderPipeline) {
         let obj = self.obj().clone();
         let mut bus_stream = CustomBusStream::new(&bus);
-        let weak_playbin = playbin.downgrade();
+        let weak_decoderpipe = decoderpipe.downgrade();
 
         RUNTIME.spawn(async move {
             while let Some(message) = bus_stream.next().await {
                 let view = message.view();
                 let this = obj.imp();
-                let playbin = {
+                let decoderpipe = {
                     let state = this.state.lock().unwrap();
 
-                    if state.playbin == weak_playbin.upgrade() && state.playbin.is_some() {
-                        state.playbin.as_ref().unwrap().clone()
+                    if state.decoderpipe == weak_decoderpipe.upgrade() && state.decoderpipe.is_some() {
+                        state.decoderpipe.as_ref().unwrap().clone()
                     } else {
-                        gst::debug!(CAT, imp: this, "Got message {:?} without playbin", message);
+                        gst::debug!(CAT, imp: this, "Got message {:?} without decoderpipe", message);
                         // We have been disconnected while we already entered the
                         // callback it seems
                         return;
@@ -230,7 +230,7 @@ impl PlaybinPoolSrc {
                         let mut start_completed = this.start_completed.lock().unwrap();
 
                         if !*start_completed
-                            && s.src() == Some(playbin.pipeline().upcast_ref())
+                            && s.src() == Some(decoderpipe.pipeline().upcast_ref())
                             && s.pending() == gst::State::VoidPending
                         {
                             *start_completed = true;
@@ -238,13 +238,13 @@ impl PlaybinPoolSrc {
                         }
                     }
                     gst::MessageView::Error(s) => {
-                        obj.imp().playbin().map(|p| {
+                        obj.imp().decoderpipe().map(|p| {
                             p.pipeline().debug_to_dot_file_with_ts(
                                 gst::DebugGraphDetails::all(),
                                 format!("{}-error", obj.name()),
                             )
                         });
-                        gst::error!(CAT, obj: obj, "Got error message: {s} from {playbin:?}");
+                        gst::error!(CAT, obj: obj, "Got error message: {s} from {decoderpipe:?}");
                         if let Err(e) = obj.post_message(s.message().to_owned()) {
                             gst::error!(CAT, "Could not post error message: {e:?}");
                         }
@@ -257,8 +257,8 @@ impl PlaybinPoolSrc {
 
     /// Ensures that a `stream-start` event with the right ID has been received
     /// already
-    fn requested_stream_started(&self, playbin: &PooledPlayBin) -> bool {
-        let selected_stream = match playbin.stream() {
+    fn requested_stream_started(&self, decoderpipe: &DecoderPipeline) -> bool {
+        let selected_stream = match decoderpipe.stream() {
             Some(stream) => stream.stream_id(),
             None => {
                 gst::info!(CAT, imp: self, "No stream selected yet");
@@ -267,7 +267,7 @@ impl PlaybinPoolSrc {
         }
         .unwrap();
 
-        playbin
+        decoderpipe
             .sink()
             .sink_pads()
             .get(0)
@@ -299,9 +299,16 @@ impl PlaybinPoolSrc {
                 || event_type == Some(gst::EventType::Segment)
         );
 
-        let playbin = self.state.lock().unwrap().playbin.as_ref().unwrap().clone();
-        let sink = playbin.sink();
-        let sink_sinkpad = playbin.sink().sink_pads().get(0).unwrap().clone();
+        let decoderpipe = self
+            .state
+            .lock()
+            .unwrap()
+            .decoderpipe
+            .as_ref()
+            .unwrap()
+            .clone();
+        let sink = decoderpipe.sink();
+        let sink_sinkpad = decoderpipe.sink().sink_pads().get(0).unwrap().clone();
 
         let return_func =
             |this: &Self, obj: gst::MiniObject| -> Result<gst::MiniObject, gst::FlowError> {
@@ -318,7 +325,7 @@ impl PlaybinPoolSrc {
                 return Err(gst::FlowError::Flushing);
             }
 
-            if self.requested_stream_started(&playbin)
+            if self.requested_stream_started(&decoderpipe)
                 && self.state.lock().unwrap().seek_seqnum.is_none()
             {
                 match event_type {
@@ -436,7 +443,7 @@ impl PlaybinPoolSrc {
                 None
             };
 
-            if !self.requested_stream_started(&playbin) {
+            if !self.requested_stream_started(&decoderpipe) {
                 gst::info!(CAT, imp: self, "Got {obj:?} from wrong stream, dropping");
                 continue;
             }
@@ -491,60 +498,49 @@ impl PlaybinPoolSrc {
         }
     }
 
-    fn set_playbin(&self, playbin: &PooledPlayBin) {
-        let pipeline = playbin.pipeline();
+    fn set_decoderpipe(&self, decoderpipe: &DecoderPipeline) {
+        let pipeline = decoderpipe.pipeline();
         let bus = pipeline.bus().unwrap();
         bus.enable_sync_message_emission();
-        self.handle_bus_messages(bus, playbin);
+        self.handle_bus_messages(bus, decoderpipe);
 
         let obj = self.obj();
         let mut state = self.state.lock().unwrap();
-        state.source_setup_sigid = Some(playbin.uridecodebin().connect_closure(
+        state.source_setup_sigid = Some(decoderpipe.uridecodebin().connect_closure(
             "source-setup",
             false,
             glib::closure!(
-                @watch obj => move |_playbin: gst::Element, source: gst::Element| {
+                @watch obj => move |_decoderpipe: gst::Element, source: gst::Element| {
                     obj.emit_by_name::<()>("source-setup", &[&source]);
                 }
             ),
         ));
 
         state.needs_segment = true;
-        state.playbin = Some(playbin.clone());
+        state.decoderpipe = Some(decoderpipe.clone());
     }
 
-    fn playbin(&self) -> Option<PooledPlayBin> {
-        self.state.lock().unwrap().playbin.clone()
+    fn decoderpipe(&self) -> Option<DecoderPipeline> {
+        self.state.lock().unwrap().decoderpipe.clone()
     }
 }
 
 #[glib::object_subclass]
 impl ObjectSubclass for PlaybinPoolSrc {
-    const NAME: &'static str = "GstPlaybinPoolSrc";
+    const NAME: &'static str = "GstUriDecodePoolSrc";
     type Type = super::PlaybinPoolSrc;
     type ParentType = gst_base::BaseSrc;
 
     type Interfaces = (gst::ChildProxy,);
 }
 
+#[glib::derived_properties]
 impl ObjectImpl for PlaybinPoolSrc {
-    fn properties() -> &'static [glib::ParamSpec] {
-        Self::derived_properties()
-    }
-
-    fn set_property(&self, id: usize, value: &Value, pspec: &ParamSpec) {
-        self.derived_set_property(id, value, pspec)
-    }
-
-    fn property(&self, id: usize, pspec: &glib::ParamSpec) -> Value {
-        self.derived_property(id, pspec)
-    }
-
     fn signals() -> &'static [glib::subclass::Signal] {
         static SIGNALS: Lazy<Vec<glib::subclass::Signal>> = Lazy::new(|| {
             vec![
                 /**
-                 * playbinpoolsrc::source-setup:
+                 * uridecodepoolsrc::source-setup:
                  * @source: The source element to setup
                  *
                  * This signal is emitted after the source element has been created,
@@ -580,8 +576,8 @@ impl ObjectImpl for PlaybinPoolSrc {
 
                 match event.view() {
                     gst::EventView::StreamStart(s) => {
-                        let playbin = this.state.lock().unwrap().playbin.as_ref().unwrap().clone();
-                        let stream = if let Some (stream) = playbin.stream() {
+                        let decoderpipe = this.state.lock().unwrap().decoderpipe.as_ref().unwrap().clone();
+                        let stream = if let Some (stream) = decoderpipe.stream() {
                             stream
                         } else {
                             gst::info!(CAT, imp: this, "StreamStart event without stream");
@@ -589,12 +585,12 @@ impl ObjectImpl for PlaybinPoolSrc {
                         };
 
                         let stream_id = stream.stream_id().unwrap();
-                        gst::debug!(CAT, imp: this, "{:?} ++++> Got stream: {:?} {}", playbin, stream.stream_type(), stream_id);
+                        gst::debug!(CAT, imp: this, "{:?} ++++> Got stream: {:?} {}", decoderpipe, stream.stream_type(), stream_id);
 
                         let settings = this.settings.lock().unwrap();
                         let mut event_builder = gst::event::StreamStart::builder(
                                 settings.stream_id.as_ref().map_or_else(|| stream_id.as_str(), |id| {
-                                    let pipeline = playbin.pipeline();
+                                    let pipeline = decoderpipe.pipeline();
                                     if id.as_str() != stream_id.as_str() {
                                         pipeline.debug_to_dot_file_with_ts(gst::DebugGraphDetails::all(), format!("{}-wrong-stream-id", this.obj().name()));
                                         gst::info!(CAT, imp: this, "Selected wrong stream ID {}, {} could probably not be found \
@@ -663,7 +659,7 @@ impl ElementImpl for PlaybinPoolSrc {
             gst::subclass::ElementMetadata::new(
                 "Source",
                 "Source",
-                "Playback source which runs a pool of playbin instances",
+                "Playback source which runs a pool of decoderpipe instances",
                 "Thibault Saunier <tsaunier@igalia.com>",
             )
         });
@@ -723,10 +719,10 @@ impl BaseSrcImpl for PlaybinPoolSrc {
 
             return true;
         };
-        let playbin = state.playbin.clone();
+        let decoderpipe = state.decoderpipe.clone();
         drop(state);
 
-        if let Some(playbin) = playbin {
+        if let Some(decoderpipe) = decoderpipe {
             gst::info!(CAT, imp: self, "Seeking to {segment:?}");
             if let gst::EventView::Seek(s) = seek_event.view() {
                 let values = s.get();
@@ -748,10 +744,10 @@ impl BaseSrcImpl for PlaybinPoolSrc {
                 CAT,
                 imp: self,
                 "Sending {seek_event:?} to {}",
-                playbin.imp().name()
+                decoderpipe.imp().name()
             );
 
-            playbin.imp().seek(seek_event);
+            decoderpipe.imp().seek(seek_event);
             true
         } else {
             gst::info!(CAT, imp: self, "No pipeline to seek");
@@ -764,8 +760,8 @@ impl BaseSrcImpl for PlaybinPoolSrc {
         gst::debug!(CAT, imp: self, "Starting");
 
         let has_uri = self.settings.lock().unwrap().uri.is_some();
-        let playbin = if has_uri {
-            self.pool.get_playbin(&self.obj())
+        let decoderpipe = if has_uri {
+            self.pool.get_decoderpipe(&self.obj())
         } else {
             return Err(gst::error_msg!(
                 gst::ResourceError::Settings,
@@ -774,8 +770,8 @@ impl BaseSrcImpl for PlaybinPoolSrc {
         };
 
         let mut start_completed = self.start_completed.lock().unwrap();
-        self.set_playbin(&playbin);
-        let res = playbin.imp().play().map_err(|err| {
+        self.set_decoderpipe(&decoderpipe);
+        let res = decoderpipe.imp().play().map_err(|err| {
             gst::error_msg!(
                 gst::ResourceError::Settings,
                 ("Failed to set underlying pipeline to PLAYING: {err:?}")
@@ -793,7 +789,7 @@ impl BaseSrcImpl for PlaybinPoolSrc {
                 "{:?} - {:?} Waiting {} state to be reached after {res:?}",
                 settings.stream_id,
                 settings.caps,
-                playbin.imp().name()
+                decoderpipe.imp().name()
             );
         }
 
@@ -807,8 +803,8 @@ impl BaseSrcImpl for PlaybinPoolSrc {
             Ok(caps) => caps.downcast::<gst::Caps>().unwrap(),
             Err(e) => {
                 if e == gst::FlowError::Eos {
-                    let playbin = self.playbin().unwrap();
-                    let sink = playbin.sink();
+                    let decoderpipe = self.decoderpipe().unwrap();
+                    let sink = decoderpipe.sink();
                     let sink_pad = sink.static_pad("sink").unwrap();
                     if let Some(caps) = sink_pad.sticky_event::<gst::event::Caps>(0) {
                         caps.caps_owned()
@@ -890,17 +886,17 @@ impl BaseSrcImpl for PlaybinPoolSrc {
             state.segment_seqnum = None;
             state.seek_event = None;
 
-            let playbin = state.playbin.as_ref().unwrap().clone();
-            let pipeline = playbin.pipeline();
+            let decoderpipe = state.decoderpipe.as_ref().unwrap().clone();
+            let pipeline = decoderpipe.pipeline();
             if let Some(sigid) = state.bus_message_sigid.take() {
                 pipeline.bus().unwrap().disconnect(sigid);
             }
             if let Some(sigid) = state.source_setup_sigid.take() {
-                playbin.uridecodebin().disconnect(sigid);
+                decoderpipe.uridecodebin().disconnect(sigid);
             }
             pipeline.bus().unwrap().disable_sync_message_emission();
 
-            state.playbin.take().unwrap()
+            state.decoderpipe.take().unwrap()
         };
 
         *self.start_completed.lock().unwrap() = false;
@@ -917,8 +913,8 @@ impl BaseSrcImpl for PlaybinPoolSrc {
                 return true;
             }
             gst::QueryViewMut::Duration(_) => {
-                if let Some(playbin) = self.playbin() {
-                    return playbin.pipeline().query(query);
+                if let Some(decoderpipe) = self.decoderpipe() {
+                    return decoderpipe.pipeline().query(query);
                 }
             }
             gst::QueryViewMut::Custom(s) => {
@@ -929,8 +925,8 @@ impl BaseSrcImpl for PlaybinPoolSrc {
                     s.structure_mut().set("res", true);
 
                     return true;
-                } else if let Some(playbin) = self.playbin() {
-                    return playbin.pipeline().query(query);
+                } else if let Some(decoderpipe) = self.decoderpipe() {
+                    return decoderpipe.pipeline().query(query);
                 }
             }
             _ => (),

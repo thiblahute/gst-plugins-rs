@@ -15,7 +15,6 @@ members = [
   "generic/sodium",
   "generic/threadshare",
   "generic/inter",
-  "generic/playbinpool",
 
   "mux/flavors",
   "mux/fmp4",
@@ -43,6 +42,7 @@ members = [
   "utils/livesync",
   "utils/togglerecord",
   "utils/tracers",
+  "utils/uridecodepool",
   "utils/uriplaylistbin",
 
   "video/cdg",
@@ -67,7 +67,6 @@ default-members = [
 
   "generic/threadshare",
   "generic/inter",
-  "generic/playbinpool",
 
   "mux/fmp4",
   "mux/mp4",
@@ -94,6 +93,7 @@ default-members = [
   "utils/livesync",
   "utils/togglerecord",
   "utils/tracers",
+  "utils/uridecodepool",
   "utils/uriplaylistbin",
 
   "video/cdg",

@@ -25,8 +25,8 @@ struct State {
 }
 
 #[derive(Properties, Debug)]
-#[properties(wrapper_type = super::PooledPlayBin)]
-pub struct PooledPlayBin {
+#[properties(wrapper_type = super::DecoderPipeline)]
+pub struct DecoderPipeline {
     pub pipeline: gst::Pipeline,
     pub uridecodebin: gst::Element,
     pub sink: gst_app::AppSink,
@@ -40,7 +40,7 @@ pub struct PooledPlayBin {
     name: String,
 }
 
-impl Default for PooledPlayBin {
+impl Default for DecoderPipeline {
     fn default() -> Self {
         let pipeline = gst::Pipeline::new();
 
@@ -103,13 +103,13 @@ impl Default for PooledPlayBin {
     }
 }
 
-impl PartialEq for PooledPlayBin {
+impl PartialEq for DecoderPipeline {
     fn eq(&self, other: &Self) -> bool {
         self.pipeline == other.pipeline
     }
 }
 
-impl PooledPlayBin {
+impl DecoderPipeline {
     fn pad_added(&self, pad: &gst::Pad) {
         gst::debug!(CAT, imp: self, "Pad added: {:?}", pad);
         let sinkpad = self.sink.static_pad("sink").unwrap();
@@ -445,19 +445,8 @@ impl PooledPlayBin {
     }
 }
 
-impl ObjectImpl for PooledPlayBin {
-    fn properties() -> &'static [glib::ParamSpec] {
-        Self::derived_properties()
-    }
-
-    fn set_property(&self, id: usize, value: &glib::Value, pspec: &glib::ParamSpec) {
-        self.derived_set_property(id, value, pspec)
-    }
-
-    fn property(&self, id: usize, pspec: &glib::ParamSpec) -> glib::Value {
-        self.derived_property(id, pspec)
-    }
-
+#[glib::derived_properties]
+impl ObjectImpl for DecoderPipeline {
     fn signals() -> &'static [glib::subclass::Signal] {
         static SIGNALS: Lazy<Vec<glib::subclass::Signal>> =
             Lazy::new(|| vec![glib::subclass::Signal::builder("released").build()]);
@@ -474,7 +463,7 @@ impl ObjectImpl for PooledPlayBin {
 }
 
 #[glib::object_subclass]
-impl ObjectSubclass for PooledPlayBin {
-    const NAME: &'static str = "GstPooledPlayBin";
-    type Type = super::PooledPlayBin;
+impl ObjectSubclass for DecoderPipeline {
+    const NAME: &'static str = "GstDecoderPipeline";
+    type Type = super::DecoderPipeline;
 }

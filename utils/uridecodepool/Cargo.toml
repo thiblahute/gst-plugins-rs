@@ -1,10 +1,10 @@
 [package]
-name = "gst-plugin-playbinpool"
+name = "gst-plugin-uridecodepool"
 version = "0.11.0-alpha.1"
 authors = ["Thibault Saunier <tsaunier@igalia.com>"]
 repository = "https://gitlab.freedesktop.org/gstreamer/gst-plugins-rs"
 license = "MIT OR Apache-2.0"
-description = "GStreamer Rust plugin to handle playbin pipelines to be used in 'subpipelines'"
+description = "GStreamer Rust plugin to expose a pool of decoding pipelines as source elements"
 edition = "2021"
 rust-version = "1.66"
 
@@ -24,7 +24,7 @@ futures = "0.3"
 once_cell.workspace = true
 
 [lib]
-name = "gstplaybinpool"
+name = "gsturidecodepool"
 crate-type = ["cdylib", "rlib"]
 path = "src/lib.rs"
 

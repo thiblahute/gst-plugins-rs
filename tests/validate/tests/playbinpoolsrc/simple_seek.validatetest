@@ -6,7 +6,7 @@ set-globals,
 meta,
     handles-states=true,
     args = {
-        "playbinpoolsrc uri=$(blue) name=p ! $(videosink)",
+        "uridecodepoolsrc uri=$(blue) name=p ! $(videosink)",
     },
     configs = {
        "$(validateflow), pad=p:src, buffers-checksum=sha256, ignored-event-types={ tag }, ignored-fields=\"stream-start={stream-id,group-id, stream}, stream-collection={collection}\"",

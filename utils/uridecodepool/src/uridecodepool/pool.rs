@@ -10,11 +10,11 @@ use gst::{
 use once_cell::sync::Lazy;
 use tokio::runtime;
 
-use super::PooledPlayBin;
+use super::DecoderPipeline;
 
 pub static CAT: Lazy<gst::DebugCategory> = Lazy::new(|| {
     gst::DebugCategory::new(
-        "playbinpool",
+        "uridecodepool",
         gst::DebugColorFlags::empty(),
         Some("Playbin Pool"),
     )
@@ -47,9 +47,9 @@ impl Default for Settings {
 
 #[derive(Debug, Default)]
 struct State {
-    running_pipelines: Vec<PooledPlayBin>,
-    unused_pipelines: Vec<PooledPlayBin>,
-    prepared_pipelines: Vec<PooledPlayBin>,
+    running_pipelines: Vec<DecoderPipeline>,
+    unused_pipelines: Vec<DecoderPipeline>,
+    prepared_pipelines: Vec<DecoderPipeline>,
 }
 
 #[derive(Debug, Default)]
@@ -80,11 +80,8 @@ impl ObjectSubclass for PlaybinPool {
     type Type = super::PlaybinPool;
 }
 
+#[glib::derived_properties]
 impl ObjectImpl for PlaybinPool {
-    fn properties() -> &'static [glib::ParamSpec] {
-        Self::derived_properties()
-    }
-
     fn signals() -> &'static [glib::subclass::Signal] {
         static SIGNALS: Lazy<Vec<glib::subclass::Signal>> = Lazy::new(|| {
             vec![
@@ -132,14 +129,6 @@ impl ObjectImpl for PlaybinPool {
         });
 
         SIGNALS.as_ref()
-    }
-
-    fn set_property(&self, id: usize, value: &glib::Value, pspec: &glib::ParamSpec) {
-        self.derived_set_property(id, value, pspec)
-    }
-
-    fn property(&self, id: usize, pspec: &glib::ParamSpec) -> glib::Value {
-        self.derived_property(id, pspec)
     }
 }
 
@@ -210,24 +199,24 @@ impl PlaybinPool {
             return false;
         }
 
-        let playbin = self.get_unused_or_create_pipeline(src, &mut state);
+        let decoderpipe = self.get_unused_or_create_pipeline(src, &mut state);
 
-        gst::debug!(CAT, imp: self, "Starting {playbin:?}");
-        if let Err(err) = playbin.imp().play() {
+        gst::debug!(CAT, imp: self, "Starting {decoderpipe:?}");
+        if let Err(err) = decoderpipe.imp().play() {
             gst::warning!(CAT, imp: self, "Failed to play pipeline: {}", err);
             return false;
         }
 
-        state.prepared_pipelines.push(playbin);
+        state.prepared_pipelines.push(decoderpipe);
 
         true
     }
 
-    pub(crate) fn get(&self, src: &super::PlaybinPoolSrc) -> PooledPlayBin {
+    pub(crate) fn get(&self, src: &super::PlaybinPoolSrc) -> DecoderPipeline {
         gst::debug!(CAT, "Getting pipeline for {:?}", src);
         let mut state = self.state.lock().unwrap();
 
-        let playbin = if let Some(position) = state
+        let decoderpipe = if let Some(position) = state
             .prepared_pipelines
             .iter()
             .position(|p| p.imp().target_src().as_ref() == Some(src))
@@ -239,21 +228,21 @@ impl PlaybinPool {
             self.get_unused_or_create_pipeline(src, &mut state)
         };
 
-        state.running_pipelines.push(playbin.clone());
+        state.running_pipelines.push(decoderpipe.clone());
 
-        playbin
+        decoderpipe
     }
 
     fn get_unused_or_create_pipeline<'lt>(
         &'lt self,
         src: &super::PlaybinPoolSrc,
         state: &mut MutexGuard<'lt, State>,
-    ) -> PooledPlayBin {
+    ) -> DecoderPipeline {
         let uri = src.uri();
         let caps = src.caps();
         let stream_id = src.stream_id();
 
-        let playbin = if let Some(position) = state.unused_pipelines.iter().position(|p| {
+        let decoderpipe = if let Some(position) = state.unused_pipelines.iter().position(|p| {
             stream_id.is_some()
                 && p.requested_stream_id()
                     .map_or(false, |id| Some(id) == stream_id)
@@ -276,12 +265,12 @@ impl PlaybinPool {
             None
         };
 
-        let playbin = playbin.map_or_else(
+        let decoderpipe = decoderpipe.map_or_else(
             || {
                 gst::debug!(CAT, "Starting new pipeline");
 
                 let pipeline =
-                    PooledPlayBin::new(uri.as_ref(), &caps, stream_id.as_deref(), &self.obj());
+                    DecoderPipeline::new(uri.as_ref(), &caps, stream_id.as_deref(), &self.obj());
                 let obj = self.obj();
                 let mut outstandings = self.outstandings.n.lock().unwrap();
                 *outstandings += 1;
@@ -292,7 +281,7 @@ impl PlaybinPool {
                     "released",
                     false,
                     glib::closure!(@watch obj => move
-                        |pipeline: PooledPlayBin| {
+                        |pipeline: DecoderPipeline| {
                             gst::debug!(CAT, obj: obj, "{pipeline:?} not used anymore.");
 
                             let this = obj.imp();
@@ -317,17 +306,17 @@ impl PlaybinPool {
 
                 pipeline
             },
-            |playbin| {
-                playbin.reset(uri.as_ref(), &caps, stream_id.as_deref());
+            |decoderpipe| {
+                decoderpipe.reset(uri.as_ref(), &caps, stream_id.as_deref());
 
-                gst::debug!(CAT, "Reusing existing pipeline: {:?}", playbin,);
+                gst::debug!(CAT, "Reusing existing pipeline: {:?}", decoderpipe,);
 
-                playbin
+                decoderpipe
             },
         );
 
-        playbin.imp().set_target_src(Some(src.clone()));
-        playbin
+        decoderpipe.imp().set_target_src(Some(src.clone()));
+        decoderpipe
     }
 
     fn cleanup(&self) {
@@ -364,7 +353,7 @@ impl PlaybinPool {
         drop(outstandings);
     }
 
-    pub(crate) fn release(&self, pipeline: PooledPlayBin) {
+    pub(crate) fn release(&self, pipeline: DecoderPipeline) {
         self.state
             .lock()
             .unwrap()

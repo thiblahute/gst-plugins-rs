@@ -2557,20 +2557,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "gst-plugin-playbinpool"
-version = "0.11.0-alpha.1"
-dependencies = [
- "futures",
- "gst-plugin-version-helper",
- "gstreamer",
- "gstreamer-app",
- "gstreamer-base",
- "once_cell",
- "tokio",
- "url",
-]
-
-[[package]]
 name = "gst-plugin-png"
 version = "0.13.0-alpha.1"
 dependencies = [
@@ -2808,6 +2794,20 @@ dependencies = [
  "gstreamer-video",
  "num-traits",
  "once_cell",
+]
+
+[[package]]
+name = "gst-plugin-uridecodepool"
+version = "0.11.0-alpha.1"
+dependencies = [
+ "futures",
+ "gst-plugin-version-helper",
+ "gstreamer",
+ "gstreamer-app",
+ "gstreamer-base",
+ "once_cell",
+ "tokio",
+ "url",
 ]
 
 [[package]]

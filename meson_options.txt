@@ -8,7 +8,6 @@ option('lewton', type: 'feature', value: 'auto', description: 'Build lewton plug
 option('spotify', type: 'feature', value: 'auto', description: 'Build spotify plugin')
 
 # generic
-option('playbinpool', type: 'feature', value: 'auto', description: 'Build file plugin')
 option('file', type: 'feature', value: 'auto', description: 'Build file plugin')
 option('sodium', type: 'feature', value: 'auto', description: 'Build sodium plugin')
 option('sodium-source', type: 'combo',
@@ -45,6 +44,7 @@ option('fallbackswitch', type: 'feature', value: 'auto', description: 'Build fal
 option('livesync', type: 'feature', value: 'auto', description: 'Build livesync plugin')
 option('togglerecord', type: 'feature', value: 'auto', description: 'Build togglerecord plugin')
 option('tracers', type: 'feature', value: 'auto', description: 'Build tracers plugin')
+option('uridecodepool', type: 'feature', value: 'auto', description: 'Build uridecodepool plugin')
 option('uriplaylistbin', type: 'feature', value: 'auto', description: 'Build uriplaylistbin plugin')
 
 # video
