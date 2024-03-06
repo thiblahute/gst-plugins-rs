@@ -88,6 +88,9 @@ impl ObjectImpl for PlaybinPool {
                 glib::subclass::Signal::builder("new-pipeline")
                     .param_types([gst::Pipeline::static_type()])
                     .build(),
+                glib::subclass::Signal::builder("prepared-pipeline-removed")
+                    .param_types([super::PlaybinPoolSrc::static_type()])
+                    .build(),
                 glib::subclass::Signal::builder("prepare-pipeline")
                     .param_types([super::PlaybinPoolSrc::static_type()])
                     .return_type::<bool>()
@@ -148,8 +151,13 @@ impl PlaybinPool {
     fn deinit(&self) {
         self.set_cleanup_timeout(0);
 
+        let obj = self.obj();
         let mut state = self.state.lock().unwrap();
         while let Some(pipeline) = state.prepared_pipelines.pop() {
+            obj.emit_by_name::<()>(
+                "prepared-pipeline-removed",
+                &[&pipeline.imp().target_src().unwrap()],
+            );
             if let Err(err) = pipeline.imp().release() {
                 gst::error!(CAT, "Failed to release pipeline: {}", err);
             }
@@ -174,6 +182,11 @@ impl PlaybinPool {
             let pipeline = state.prepared_pipelines.remove(position);
             drop(state);
 
+            self.obj().emit_by_name::<()>(
+                "prepared-pipeline-removed",
+                &[&pipeline.imp().target_src().unwrap()],
+            );
+
             if let Err(err) = pipeline.imp().release() {
                 gst::error!(CAT, "Failed to release pipeline: {}", err);
             }
@@ -185,7 +198,7 @@ impl PlaybinPool {
     }
 
     fn prepare_pipeline(&self, src: &super::PlaybinPoolSrc) -> bool {
-        gst::debug!(CAT, imp: self, "Preparing pipeline for {:?}", src);
+        gst::info!(CAT, imp: self, "Preparing pipeline for {}:{:?}", src.name(), src as *const _);
 
         let mut state = self.state.lock().unwrap();
 
@@ -194,7 +207,12 @@ impl PlaybinPool {
             .iter()
             .any(|p| p.imp().target_src().as_ref() == Some(src))
         {
-            gst::debug!(CAT, "Pipeline already prepared for {:?}", src);
+            gst::debug!(
+                CAT,
+                "Pipeline already prepared for {}:{:?}",
+                src.name(),
+                src as *const _
+            );
 
             return false;
         }
@@ -213,7 +231,7 @@ impl PlaybinPool {
     }
 
     pub(crate) fn get(&self, src: &super::PlaybinPoolSrc) -> DecoderPipeline {
-        gst::debug!(CAT, "Getting pipeline for {:?}", src);
+        gst::debug!(CAT, "Getting pipeline for {:?}", src.name());
         let mut state = self.state.lock().unwrap();
 
         let decoderpipe = if let Some(position) = state
@@ -221,9 +239,21 @@ impl PlaybinPool {
             .iter()
             .position(|p| p.imp().target_src().as_ref() == Some(src))
         {
-            gst::debug!(CAT, "Using already prepared pipeline for {:?}", src);
+            let pipe = state.prepared_pipelines.remove(position);
 
-            state.prepared_pipelines.remove(position)
+            self.obj()
+                .emit_by_name::<()>("prepared-pipeline-removed", &[&src]);
+
+            gst::info!(
+                CAT,
+                "Using already prepared pipeline for {} -- {:?}?stream-id{:?} -- {:?}",
+                src.name(),
+                src.uri(),
+                src.stream_id(),
+                pipe.pipeline().state(gst::ClockTime::NONE)
+            );
+
+            pipe
         } else {
             self.get_unused_or_create_pipeline(src, &mut state)
         };
