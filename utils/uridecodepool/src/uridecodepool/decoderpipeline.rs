@@ -1,4 +1,7 @@
-use std::sync::Mutex;
+use std::sync::{
+    atomic::{AtomicU32, Ordering},
+    Mutex,
+};
 
 use gst::{
     glib::{self, Properties},
@@ -42,7 +45,11 @@ pub struct DecoderPipeline {
 
 impl Default for DecoderPipeline {
     fn default() -> Self {
-        let pipeline = gst::Pipeline::new();
+        static N_PIPELINES: AtomicU32 = AtomicU32::new(0);
+        let pipeline = gst::Pipeline::with_name(&format!(
+            "pooledpipeline-{}",
+            N_PIPELINES.fetch_add(1, Ordering::SeqCst)
+        ));
 
         let uridecodebin = gst::ElementFactory::make("uridecodebin3")
             .property("instant-uri", true)
