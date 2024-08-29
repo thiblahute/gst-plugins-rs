@@ -10,17 +10,17 @@ mod pool;
 mod seek_handler;
 
 glib::wrapper! {
-    pub struct PlaybinPoolSrc(ObjectSubclass<imp::PlaybinPoolSrc>)
+    pub struct UriDecodePoolSrc(ObjectSubclass<imp::UriDecodePoolSrc>)
         @extends gst_base::BaseSrc, gst::Element, gst::Object,
         @implements gst::ChildProxy;
 }
 
 glib::wrapper! {
-    pub struct PlaybinPool(ObjectSubclass<pool::PlaybinPool>);
+    pub struct UriDecodePool(ObjectSubclass<pool::UriDecodePool>);
 }
 
-impl PlaybinPool {
-    pub(crate) fn get_decoderpipe(&self, src: &PlaybinPoolSrc) -> DecoderPipeline {
+impl UriDecodePool {
+    pub(crate) fn get_decoderpipe(&self, src: &UriDecodePoolSrc) -> DecoderPipeline {
         self.imp().get(src)
     }
 
@@ -66,7 +66,7 @@ impl DecoderPipeline {
         uri: &str,
         caps: &gst::Caps,
         stream_id: Option<&str>,
-        pool: &PlaybinPool,
+        pool: &UriDecodePool,
         initial_seek: Option<gst::Event>,
     ) -> DecoderPipeline {
         let this: DecoderPipeline = glib::Object::builder()
@@ -85,6 +85,6 @@ pub fn register(plugin: &gst::Plugin) -> Result<(), glib::BoolError> {
         Some(plugin),
         "uridecodepoolsrc",
         gst::Rank::NONE,
-        PlaybinPoolSrc::static_type(),
+        UriDecodePoolSrc::static_type(),
     )
 }

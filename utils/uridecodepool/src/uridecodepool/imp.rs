@@ -66,8 +66,8 @@ struct State {
 }
 
 #[derive(Properties, Debug)]
-#[properties(wrapper_type = super::PlaybinPoolSrc)]
-pub struct PlaybinPoolSrc {
+#[properties(wrapper_type = super::UriDecodePoolSrc)]
+pub struct UriDecodePoolSrc {
     #[property(name="uri", get, set, type = Option<String>, member = uri, blurb = "The URI to play")]
     #[property(name = "caps", get, set, type = gst::Caps, member = caps,
         blurb = "The caps of the stream to target"
@@ -92,17 +92,17 @@ pub struct PlaybinPoolSrc {
     state: Mutex<State>,
     start_completed: Mutex<bool>,
 
-    #[property(name="pool", get, type = super::PlaybinPool, blurb = "The pool used")]
-    pool: super::PlaybinPool,
+    #[property(name="pool", get, type = super::UriDecodePool, blurb = "The pool used")]
+    pool: super::UriDecodePool,
 }
 
-impl Default for PlaybinPoolSrc {
+impl Default for UriDecodePoolSrc {
     fn default() -> Self {
         Self {
             settings: Mutex::new(Settings::default()),
             state: Mutex::new(State::default()),
             start_completed: Default::default(),
-            pool: pool::PLAYBIN_POOL.lock().unwrap().clone(),
+            pool: pool::PIPELINE_POOL_POOL.lock().unwrap().clone(),
         }
     }
 }
@@ -176,7 +176,7 @@ impl futures::stream::FusedStream for CustomBusStream {
     }
 }
 
-impl PlaybinPoolSrc {
+impl UriDecodePoolSrc {
     pub(crate) fn send_seek(&self, seek: gst::Event) {
         gst::debug!(CAT, imp: self, "Sending seek event {:?}", seek);
 
@@ -746,16 +746,16 @@ impl PlaybinPoolSrc {
 }
 
 #[glib::object_subclass]
-impl ObjectSubclass for PlaybinPoolSrc {
+impl ObjectSubclass for UriDecodePoolSrc {
     const NAME: &'static str = "GstUriDecodePoolSrc";
-    type Type = super::PlaybinPoolSrc;
+    type Type = super::UriDecodePoolSrc;
     type ParentType = gst_base::BaseSrc;
 
     type Interfaces = (gst::ChildProxy,);
 }
 
 #[glib::derived_properties]
-impl ObjectImpl for PlaybinPoolSrc {
+impl ObjectImpl for UriDecodePoolSrc {
     fn signals() -> &'static [glib::subclass::Signal] {
         static SIGNALS: Lazy<Vec<glib::subclass::Signal>> = Lazy::new(|| {
             vec![
@@ -817,9 +817,9 @@ impl ObjectImpl for PlaybinPoolSrc {
     }
 }
 
-impl GstObjectImpl for PlaybinPoolSrc {}
+impl GstObjectImpl for UriDecodePoolSrc {}
 
-impl ElementImpl for PlaybinPoolSrc {
+impl ElementImpl for UriDecodePoolSrc {
     fn change_state(
         &self,
         transition: gst::StateChange,
@@ -883,7 +883,7 @@ impl ElementImpl for PlaybinPoolSrc {
     }
 }
 
-impl BaseSrcImpl for PlaybinPoolSrc {
+impl BaseSrcImpl for UriDecodePoolSrc {
     fn is_seekable(&self) -> bool {
         static NOTIFIED: Once = Once::new();
 
@@ -1223,7 +1223,7 @@ impl BaseSrcImpl for PlaybinPoolSrc {
     }
 }
 
-impl ChildProxyImpl for PlaybinPoolSrc {
+impl ChildProxyImpl for UriDecodePoolSrc {
     fn child_by_index(&self, _index: u32) -> Option<glib::Object> {
         None
     }

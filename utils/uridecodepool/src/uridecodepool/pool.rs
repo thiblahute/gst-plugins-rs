@@ -59,8 +59,8 @@ struct Outstandings {
 }
 
 #[derive(Properties, Debug, Default)]
-#[properties(wrapper_type = super::PlaybinPool)]
-pub struct PlaybinPool {
+#[properties(wrapper_type = super::UriDecodePool)]
+pub struct UriDecodePool {
     state: Mutex<State>,
     // Number of pipelines in use
     outstandings: Outstandings,
@@ -75,13 +75,13 @@ pub struct PlaybinPool {
 }
 
 #[glib::object_subclass]
-impl ObjectSubclass for PlaybinPool {
-    const NAME: &'static str = "GstPlaybinPool";
-    type Type = super::PlaybinPool;
+impl ObjectSubclass for UriDecodePool {
+    const NAME: &'static str = "GstUriDecodePool";
+    type Type = super::UriDecodePool;
 }
 
 #[glib::derived_properties]
-impl ObjectImpl for PlaybinPool {
+impl ObjectImpl for UriDecodePool {
     fn signals() -> &'static [glib::subclass::Signal] {
         static SIGNALS: Lazy<Vec<glib::subclass::Signal>> = Lazy::new(|| {
             vec![
@@ -89,32 +89,32 @@ impl ObjectImpl for PlaybinPool {
                     .param_types([gst::Pipeline::static_type()])
                     .build(),
                 glib::subclass::Signal::builder("prepared-pipeline-removed")
-                    .param_types([super::PlaybinPoolSrc::static_type()])
+                    .param_types([super::UriDecodePoolSrc::static_type()])
                     .build(),
                 glib::subclass::Signal::builder("prepare-pipeline")
-                    .param_types([super::PlaybinPoolSrc::static_type()])
+                    .param_types([super::UriDecodePoolSrc::static_type()])
                     .return_type::<bool>()
                     .action()
                     .class_handler(|_, args| {
-                        let pool = args[0].get::<super::PlaybinPool>().unwrap();
-                        let src = args[1].get::<&super::PlaybinPoolSrc>().unwrap();
+                        let pool = args[0].get::<super::UriDecodePool>().unwrap();
+                        let src = args[1].get::<&super::UriDecodePoolSrc>().unwrap();
 
                         Some(pool.imp().prepare_pipeline(src).into())
                     })
                     .build(),
                 glib::subclass::Signal::builder("unprepare-pipeline")
-                    .param_types([super::PlaybinPoolSrc::static_type()])
+                    .param_types([super::UriDecodePoolSrc::static_type()])
                     .return_type::<bool>()
                     .action()
                     .class_handler(|_, args| {
-                        let pool = args[0].get::<super::PlaybinPool>().unwrap();
-                        let src = args[1].get::<&super::PlaybinPoolSrc>().unwrap();
+                        let pool = args[0].get::<super::UriDecodePool>().unwrap();
+                        let src = args[1].get::<&super::UriDecodePoolSrc>().unwrap();
 
                         Some(pool.imp().unprepare_pipeline(src).into())
                     })
                     .build(),
                 /**
-                 * GstPlaybinPool::deinit:
+                 * GstUriDecodePool::deinit:
                  *
                  * Deinitialize the pool, should be called when deinitializing
                  * GStreamer.
@@ -122,7 +122,7 @@ impl ObjectImpl for PlaybinPool {
                 glib::subclass::Signal::builder("deinit")
                     .action()
                     .class_handler(|_, args| {
-                        let pool = args[0].get::<super::PlaybinPool>().unwrap();
+                        let pool = args[0].get::<super::UriDecodePool>().unwrap();
 
                         pool.imp().deinit();
                         None
@@ -135,10 +135,10 @@ impl ObjectImpl for PlaybinPool {
     }
 }
 
-pub(crate) static PLAYBIN_POOL: Lazy<Mutex<super::PlaybinPool>> =
+pub(crate) static PIPELINE_POOL_POOL: Lazy<Mutex<super::UriDecodePool>> =
     Lazy::new(|| Mutex::new(glib::Object::new()));
 
-impl PlaybinPool {
+impl UriDecodePool {
     fn set_cleanup_timeout(&self, timeout: u64) {
         {
             let mut settings = self.settings.lock().unwrap();
@@ -170,7 +170,7 @@ impl PlaybinPool {
         }
     }
 
-    fn unprepare_pipeline(&self, src: &super::PlaybinPoolSrc) -> bool {
+    fn unprepare_pipeline(&self, src: &super::UriDecodePoolSrc) -> bool {
         gst::debug!(CAT, imp: self, "Unpreparing pipeline for {:?}", src);
 
         let mut state = self.state.lock().unwrap();
@@ -197,7 +197,7 @@ impl PlaybinPool {
         false
     }
 
-    fn prepare_pipeline(&self, src: &super::PlaybinPoolSrc) -> bool {
+    fn prepare_pipeline(&self, src: &super::UriDecodePoolSrc) -> bool {
         gst::error!(CAT, imp: self, "Preparing pipeline for {}:{:?}", src.name(), src as *const _);
 
         let mut state = self.state.lock().unwrap();
@@ -229,7 +229,7 @@ impl PlaybinPool {
         true
     }
 
-    pub(crate) fn get(&self, src: &super::PlaybinPoolSrc) -> DecoderPipeline {
+    pub(crate) fn get(&self, src: &super::UriDecodePoolSrc) -> DecoderPipeline {
         gst::debug!(CAT, "Getting pipeline for {:?}", src.name());
         let mut state = self.state.lock().unwrap();
 
@@ -272,7 +272,7 @@ impl PlaybinPool {
 
     fn get_unused_or_create_pipeline<'lt>(
         &'lt self,
-        src: &super::PlaybinPoolSrc,
+        src: &super::UriDecodePoolSrc,
         state: &mut MutexGuard<'lt, State>,
     ) -> DecoderPipeline {
         let uri = src.uri();

@@ -118,7 +118,7 @@ impl SeekHandler {
     fn get_sample_start_end_stream_time(
         &self,
         sample: &gst::Sample,
-        obj: &super::PlaybinPoolSrc,
+        obj: &super::UriDecodePoolSrc,
     ) -> Result<(bool, gst::ClockTime, gst::ClockTime), gst::FlowError> {
         if let (Some(buffer), Some(Ok(segment))) = (
             sample.buffer(),
@@ -177,7 +177,7 @@ impl SeekHandler {
 
     fn check_eos(
         &self,
-        obj: &super::PlaybinPoolSrc,
+        obj: &super::UriDecodePoolSrc,
         sample: &gst::Sample,
     ) -> Result<bool, gst::FlowError> {
         let mut state = self.state.lock().unwrap();
@@ -259,7 +259,7 @@ impl SeekHandler {
 
     pub(crate) fn process(
         &self,
-        obj: &super::PlaybinPoolSrc,
+        obj: &super::UriDecodePoolSrc,
         sample: &gst::Sample,
     ) -> Result<SeekInfo, gst::FlowError> {
         let state = self.state.lock().unwrap();
@@ -423,7 +423,7 @@ impl SeekHandler {
         return_seek_info(None, SeekInfo::SeekSegment(seek.seqnum(), segment))
     }
 
-    pub(crate) fn handle_seek(&self, obj: &super::PlaybinPoolSrc, seek: &gst::event::Seek) -> bool {
+    pub(crate) fn handle_seek(&self, obj: &super::UriDecodePoolSrc, seek: &gst::event::Seek) -> bool {
         let (rate, flags, start_type, start, stop_type, stop) = seek.get();
         let mut nlecomposition_seek_data = self.nlecomposition_seek_data.lock().unwrap();
         gst::debug!(CAT, obj: obj, "====> Handling seek {seek:?} - {nlecomposition_seek_data:?}");
@@ -458,7 +458,8 @@ impl SeekHandler {
             // In case of nlecomposition seeks that were not "unexpected"
             drop(nlecomposition_seek_data);
 
-            gst::error!(CAT, obj: obj, "====> Not expecting nlecomposition seek, let source handle the seek  'normally' and reset");
+            gst::error!(CAT, obj: obj,
+                "====> Not expecting nlecomposition seek, let source handle the seek  'normally' and reset");
             if flags.contains(gst::SeekFlags::FLUSH) {
                 gst::error!(CAT, obj: obj, "====> Flushing seek, reseting");
                 self.reset(obj.upcast_ref());

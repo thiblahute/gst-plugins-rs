@@ -22,14 +22,14 @@ struct State {
     bus_message_sigid: Option<glib::SignalHandlerId>,
     stream_selection_seqnum: gst::Seqnum,
 
-    target_src: Option<super::PlaybinPoolSrc>,
+    target_src: Option<super::UriDecodePoolSrc>,
     pending_seek: Option<gst::Event>,
 
     // Seek to be sent to apply inpoint/duration values
     initial_seek: Option<gst::Event>,
     last_seek_seqnum: gst::Seqnum,
 
-    pool: Option<super::PlaybinPool>,
+    pool: Option<super::UriDecodePool>,
 }
 
 #[derive(Properties, Debug)]
@@ -39,7 +39,7 @@ pub struct DecoderPipeline {
     pub uridecodebin: gst::Element,
     pub sink: gst_app::AppSink,
 
-    #[property(name="pool", set, get, type = super::PlaybinPool, construct_only, member = pool)]
+    #[property(name="pool", set, get, type = super::UriDecodePool, construct_only, member = pool)]
     #[property(name="initial-seek", set, get, type = gst::Event, construct_only, member = initial_seek)]
     state: Mutex<State>,
 
@@ -455,11 +455,11 @@ impl DecoderPipeline {
         self.pipeline.set_state(gst::State::Playing)
     }
 
-    pub(crate) fn target_src(&self) -> Option<super::PlaybinPoolSrc> {
+    pub(crate) fn target_src(&self) -> Option<super::UriDecodePoolSrc> {
         self.state.lock().unwrap().target_src.clone()
     }
 
-    pub(crate) fn set_target_src(&self, target_src: Option<super::PlaybinPoolSrc>) {
+    pub(crate) fn set_target_src(&self, target_src: Option<super::UriDecodePoolSrc>) {
         let mut state = self.state.lock().unwrap();
 
         if target_src.is_some() {
