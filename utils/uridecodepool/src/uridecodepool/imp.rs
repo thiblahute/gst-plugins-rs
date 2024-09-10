@@ -306,11 +306,11 @@ impl UriDecodePoolSrc {
         });
     }
 
-    // Avoid sending the seek to the baseclass until we have called `start_complete()` as
+    // Avoid sending the seek to the baseclass until we call `start_completed()` as
     // seeking in the baseclass starts the srcpad tasks, and then we can end up calling `start_complete`,
     // which needs the STREAM_LOCK, while it is taken by the streaming thread.
     //
-    // Returns `true`` if the event should be postponed or `false` if it should be sent to the base
+    // Returns `true` if the event should be postponed or `false` if it should be sent to the base
     // class
     fn handle_seek_event(&self, event: &gst::Event) -> bool {
         let start_completed = self.start_completed.lock().unwrap();
@@ -434,7 +434,7 @@ impl UriDecodePoolSrc {
             }
 
             let is_eos = sink.is_eos();
-            // Avoid blocking forever if for some reason the underlying pipeline is stuck, allowing
+            // Avoid blocking forever if for some the underlying pipeline is stuck, allowing
             // the element to be flushed/stopped
             let obj = match sink.try_pull_object(gst::ClockTime::from_seconds(10)) {
                 Some(obj) => Ok(obj),
@@ -703,28 +703,6 @@ impl UriDecodePoolSrc {
         }
     }
 
-    fn eos_probe(
-        &self,
-        probe_info: &mut gst::PadProbeInfo,
-        eos: &gst::event::Eos,
-    ) -> gst::PadProbeReturn {
-        let state = self.state.lock().unwrap();
-
-        gst::debug!(CAT, imp: self, "Got {eos:?}");
-        if let Some(seqnum) = state.segment_seqnum.as_ref() {
-            if eos.seqnum() != *seqnum {
-                let mut builder = gst::event::Eos::builder()
-                    .running_time_offset(eos.running_time_offset())
-                    .seqnum(eos.seqnum());
-                builder = builder.seqnum(*seqnum);
-                gst::warning!(CAT, imp: self, "Forcing {seqnum:?} on EOS as previous one was wrong ({:#?})", eos);
-                probe_info.data = Some(gst::PadProbeData::Event(builder.build()));
-            }
-        }
-
-        gst::PadProbeReturn::Ok
-    }
-
     fn set_caps(&self, caps: gst::Caps) -> Result<(), gst::FlowError> {
         self.obj()
             .upcast_ref::<gst_base::BaseSrc>()
@@ -809,7 +787,6 @@ impl ObjectImpl for UriDecodePoolSrc {
                     }
                     gst::EventView::StreamStart(s) => this.stream_start_probe(probe_info, s),
                     gst::EventView::Segment(s) => this.segment_probe(probe_info, s),
-                    gst::EventView::Eos(eos) => this.eos_probe(probe_info, eos),
                     _ => gst::PadProbeReturn::Ok
                 }
 
@@ -897,10 +874,6 @@ impl BaseSrcImpl for UriDecodePoolSrc {
     fn unlock(&self) -> Result<(), gst::ErrorMessage> {
         gst::debug!(CAT, imp: self, "Start flushing!");
         self.state.lock().unwrap().flushing = true;
-
-        if let Some(p) = self.decoderpipe() {
-            p.seek_handler().reset(self.obj().upcast_ref());
-        }
 
         Ok(())
     }
@@ -1083,7 +1056,7 @@ impl BaseSrcImpl for UriDecodePoolSrc {
     ) -> Result<gst_base::subclass::base_src::CreateSuccess, gst::FlowError> {
         let pipeline = self.decoderpipe().unwrap();
 
-        gst::log!(CAT, imp: self, "create with underlying pipeline state: {:?}", pipeline.pipeline().state(gst::ClockTime::ZERO));
+        gst::log!(CAT, imp: self, "create with underlying pipeline state:  {:?}", pipeline.pipeline().state(gst::ClockTime::ZERO));
 
         // If we are inside nlecomposition, we need to use the sample that triggered the fake EOS
         // and set the caps from it.
@@ -1107,9 +1080,9 @@ impl BaseSrcImpl for UriDecodePoolSrc {
             )
         };
 
-        let segment = match pipeline.seek_handler().process(&self.obj(), &sample)? {
+        let segment = match pipeline.seek_handler().process(&*self.obj(), &sample)? {
             SeekInfo::SeekSegment(seqnum, segment) => {
-                gst::debug!(CAT, imp: self, "Got seek segment after process --> new seqnum: {seqnum:?} -- {:?}",  self.state.lock().unwrap().seek_seqnum);
+                gst::log!(CAT, imp: self, "Got seek segment after process --> new seqnum: {seqnum:?} -- {:?}",  self.state.lock().unwrap().seek_seqnum);
                 self.state.lock().unwrap().segment_seqnum = Some(seqnum);
 
                 Some(segment)

@@ -264,6 +264,7 @@ impl DecoderPipeline {
             self.pipeline.clone()
         };
 
+        gst::info!(CAT, obj: pipeline, "--> Sending seek {:?}", seek_event);
         if !pipeline.send_event(seek_event) {
             gst::error!(CAT, obj: self.pipeline, "Failed to seek");
             return false;
@@ -522,7 +523,7 @@ impl DecoderPipeline {
                 gst::error!(CAT, obj: pipeline, "Could not teardown pipeline {err:?}");
             }
 
-            this.seek_handler.reset(this.obj().upcast_ref());
+            this.seek_handler.reset(obj.upcast_ref());
         });
     }
 }

@@ -393,22 +393,22 @@ impl SeekHandler {
                 return return_seek_info(Some(state), SeekInfo::None);
             }
         } else {
-            let (current_start, current_stop) = (
+            let (inpoint, outpoint) = (
                 obj.inpoint().unwrap_or(gst::ClockTime::ZERO),
                 obj.inpoint().unwrap_or(gst::ClockTime::ZERO) + duration.expect("Checked before"),
             );
             if obj.reverse() {
-                if seek_stop != Some(current_stop) {
+                if seek_stop != Some(outpoint) {
                     gst::info!(CAT, obj: obj, "Reverse playback but stop != inpoint + duration, not using default segment");
                     return return_seek_info(Some(state), SeekInfo::None);
                 }
 
-                if seek_stop > Some(current_start) {
+                if seek_stop > Some(inpoint) {
                     gst::info!(CAT, obj: obj, "Reverse playback but start > inpoint, not using default segment");
                     return return_seek_info(Some(state), SeekInfo::None);
                 }
-            } else if seek_start != Some(current_start) {
-                gst::info!(CAT, obj: obj, "seek_start({seek_start:?}) != current_start({current_start:?}), not using default segment");
+            } else if seek_start != Some(inpoint) {
+                gst::info!(CAT, obj: obj, "seek_start({seek_start:?}) != inpoint({inpoint:?}), not using default segment");
                 return return_seek_info(Some(state), SeekInfo::None);
             }
         }
@@ -448,7 +448,8 @@ impl SeekHandler {
             }
 
             if !nlecomposition_seek_data.expect_nle_seek {
-                gst::error!(CAT, obj: obj, "Expected seek doesn't match received one: expected_nle_seek={:?} - resetting seek_info", nlecomposition_seek_data.expect_nle_seek);
+                gst::info!(CAT, obj: obj,
+                    "Expected seek doesn't match received one: expected_nle_seek={:?} - resetting seek_info", nlecomposition_seek_data.expect_nle_seek);
                 self.state.lock().unwrap().seek_info = SeekInfo::None;
                 self.waiting_nlecomposition_seek_cond.notify_all();
             }

@@ -262,7 +262,7 @@ impl UriDecodePool {
             gst::error!(
                 CAT,
                 obj: pipeline,
-                "{} for {} -- {:?}?stream-id{:?} -- {:?}",
+                "{} for {} -- {:?}?stream-id={:?} -- {:?}",
                 if pipe.imp().seek_handler.has_eos_sample() {
                     "Reusing already running pipeline to try to keep flow"
                 } else {
@@ -331,8 +331,6 @@ impl UriDecodePool {
 
         let decoderpipe = decoderpipe.map_or_else(
             || {
-                gst::error!(CAT, "Starting new pipeline for {:?}", src.name(),);
-
                 let pipeline = DecoderPipeline::new(
                     uri.as_ref()
                         .expect("URI should be set when getting an underlying pipeline"),
@@ -340,6 +338,12 @@ impl UriDecodePool {
                     stream_id.as_deref(),
                     &self.obj(),
                     seek,
+                );
+                gst::info!(
+                    CAT,
+                    "Started new pipeline for {:?} -> {}",
+                    src.name(),
+                    pipeline.pipeline().name()
                 );
                 let obj = self.obj();
                 let mut outstandings = self.outstandings.n.lock().unwrap();
