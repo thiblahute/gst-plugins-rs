@@ -299,6 +299,7 @@ impl UriDecodePool {
                 && !p.seek_handler().has_eos_sample()
                 && p.requested_stream_id()
                     .map_or(false, |id| Some(id) == stream_id)
+                && false
         }) {
             gst::debug!(CAT, "Reusing the exact same pipeline for {:?}", stream_id);
             Some(state.unused_pipelines.remove(position))
