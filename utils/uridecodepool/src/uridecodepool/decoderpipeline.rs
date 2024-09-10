@@ -454,7 +454,6 @@ impl DecoderPipeline {
         gst::debug!(CAT, obj: self.pipeline, "Starting pipeline");
 
         self.tearing_down.store(false, Ordering::SeqCst);
-        let _state_lock = self.state_lock.lock();
         if self.pipeline.state(None).1 < gst::State::Paused {
             if let Some(seek_event) = self.initial_seek() {
                 gst::debug!(CAT, obj: self.pipeline, "Using initial seek as pending_seek: {:?}", seek_event);
