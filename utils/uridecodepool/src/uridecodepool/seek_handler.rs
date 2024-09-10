@@ -420,10 +420,14 @@ impl SeekHandler {
         gst::log!(CAT, obj: obj, "Sending seek to baseclass {:?}", seek.event());
         obj.imp().send_seek(seek.event().to_owned());
 
-        return_seek_info(None, SeekInfo::SeekSegment(seek.seqnum(), segment))
+        return return_seek_info(None, SeekInfo::SeekSegment(seek.seqnum(), segment));
     }
 
-    pub(crate) fn handle_seek(&self, obj: &super::UriDecodePoolSrc, seek: &gst::event::Seek) -> bool {
+    pub(crate) fn handle_seek(
+        &self,
+        obj: &super::UriDecodePoolSrc,
+        seek: &gst::event::Seek,
+    ) -> bool {
         let (rate, flags, start_type, start, stop_type, stop) = seek.get();
         let mut nlecomposition_seek_data = self.nlecomposition_seek_data.lock().unwrap();
         gst::debug!(CAT, obj: obj, "====> Handling seek {seek:?} - {nlecomposition_seek_data:?}");
@@ -482,9 +486,10 @@ impl SeekHandler {
                 .unwrap();
         }
         gst::debug!(CAT, obj: obj, " {nlecomposition_seek_data:?}");
-        drop(nlecomposition_seek_data);
 
         let state = self.state.lock().unwrap();
+
+        gst::debug!(CAT, obj: obj, " {:?}", state.seek_info);
 
         !matches!(&state.seek_info, SeekInfo::None)
     }
