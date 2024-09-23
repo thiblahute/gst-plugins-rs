@@ -120,8 +120,8 @@ impl Default for DecoderPipeline {
             }),
             state_lock: ReentrantMutex::new(false),
             tearing_down: AtomicBool::new(false),
+            seek_handler: SeekHandler::new(&name),
             name,
-            seek_handler: SeekHandler::default(),
         }
     }
 }
@@ -133,6 +133,34 @@ impl PartialEq for DecoderPipeline {
 }
 
 impl DecoderPipeline {
+    fn pad_removed(&self, _pad: &gst::Pad) {
+        let sinkpad = self.sink.static_pad("sink").unwrap();
+
+        if let Some(peer) = sinkpad.peer() {
+            if let Err(err) = peer.unlink(&sinkpad) {
+                gst::error!(CAT, imp: self, "Could not unlink {}:{} from {:?}:{}: {err:?}",
+                    peer.parent().unwrap().name(), peer.name(),
+                    sinkpad.parent().map(|e| e.name()), sinkpad.name());
+            }
+
+            let pipeline = self.pipeline();
+            if let Some(parent) = peer.parent() {
+                if parent.parent().as_ref() == Some(pipeline.upcast_ref()) {
+                    let element = parent.downcast::<gst::Element>().unwrap();
+
+                    gst::log!(CAT, imp: self, "Removing {} from {}", element.name(), pipeline.name());
+                    if let Err(e) = element.set_state(gst::State::Null) {
+                        gst::error!(CAT, imp: self, "Could not set {} state to Null: {e:?}", element.name());
+                    }
+                    if let Err(e) = pipeline.remove(element.downcast_ref::<gst::Element>().unwrap())
+                    {
+                        gst::error!(CAT, imp: self, "Could not remove {} from pipeline: {e:?}", element.name());
+                    }
+                }
+            }
+        }
+    }
+
     fn pad_added(&self, pad: &gst::Pad) {
         gst::debug!(CAT, imp: self, "Pad added: {:?}", pad);
         let sinkpad = self.sink.static_pad("sink").unwrap();
@@ -371,6 +399,7 @@ impl DecoderPipeline {
                         break;
                     }
                 }
+
                 // if self.state.lock().unwrap().pending_seek.as_ref().is_some() {
                 //     // We got a StreamCollection, we should be ready to seek now!
                 //     self.seek_in_thread();
@@ -390,6 +419,13 @@ impl DecoderPipeline {
                         gst::warning!(CAT, obj: self.pipeline, "Could not post message {message:?}: {e:?}");
                     }
                 }
+            }
+            gst::MessageView::Error(s) => {
+                gst::error!(CAT, imp: self, "Got error message: {s}");
+                self.pipeline().debug_to_dot_file_with_ts(
+                    gst::DebugGraphDetails::all(),
+                    format!("error-{}", self.name),
+                );
             }
             gst::MessageView::StateChanged(s) => {
                 if s.src()
@@ -416,11 +452,11 @@ impl DecoderPipeline {
             let seek_event = if let Some(seek_event) = state.pending_seek.take() {
                 seek_event
             } else {
-                gst::error!(CAT, obj: pipeline, "--> No pending seek");
+                gst::debug!(CAT, obj: pipeline, "--> No pending seek");
                 return;
             };
 
-            gst::error!(CAT, obj: pipeline, "--> Sending pending seek {:?}", seek_event);
+            gst::info!(CAT, obj: pipeline, "--> Sending pending seek {:?}", seek_event.seqnum());
             drop(state);
 
             if !pipeline.send_event(seek_event) {
@@ -454,12 +490,18 @@ impl DecoderPipeline {
         gst::debug!(CAT, obj: self.pipeline, "Starting pipeline");
 
         self.tearing_down.store(false, Ordering::SeqCst);
-        if self.pipeline.state(None).1 < gst::State::Paused {
+        let (res, state, pending) = self.pipeline.state(gst::ClockTime::ZERO);
+        res?;
+        if state < gst::State::Paused {
             if let Some(seek_event) = self.initial_seek() {
                 gst::debug!(CAT, obj: self.pipeline, "Using initial seek as pending_seek: {:?}", seek_event);
                 self.state.lock().unwrap().pending_seek = Some(seek_event);
             }
         }
+        gst::debug!(
+            CAT,
+            "Pipeline state is {state:?} and pending is {pending:?}"
+        );
         self.pipeline.set_state(gst::State::Playing)
     }
 
@@ -522,7 +564,8 @@ impl DecoderPipeline {
                 gst::error!(CAT, obj: pipeline, "Could not teardown pipeline {err:?}");
             }
 
-            this.seek_handler.reset(obj.upcast_ref());
+            this.seek_handler.reset(this.pipeline().upcast_ref());
+            obj.emit_by_name::<()>("stopped", &[]);
         });
     }
 }
@@ -530,8 +573,12 @@ impl DecoderPipeline {
 #[glib::derived_properties]
 impl ObjectImpl for DecoderPipeline {
     fn signals() -> &'static [glib::subclass::Signal] {
-        static SIGNALS: Lazy<Vec<glib::subclass::Signal>> =
-            Lazy::new(|| vec![glib::subclass::Signal::builder("released").build()]);
+        static SIGNALS: Lazy<Vec<glib::subclass::Signal>> = Lazy::new(|| {
+            vec![
+                glib::subclass::Signal::builder("released").build(),
+                glib::subclass::Signal::builder("stopped").build(),
+            ]
+        });
 
         SIGNALS.as_ref()
     }
@@ -540,6 +587,10 @@ impl ObjectImpl for DecoderPipeline {
         self.uridecodebin
             .connect_pad_added(glib::clone!(@weak self as this => move |_, pad| {
                     this.pad_added(pad);
+            }));
+        self.uridecodebin
+            .connect_pad_removed(glib::clone!(@weak self as this => move |_, pad| {
+                    this.pad_removed(pad);
             }));
     }
 }
