@@ -179,6 +179,7 @@ struct State {
     queues: HashMap<usize, Arc<glib::GString>>,
     log: Vec<LogLine>,
     settings: Settings,
+    logs_written: bool,
 }
 
 struct LogLine {
@@ -239,48 +240,31 @@ impl ObjectImpl for QueueLevels {
         self.register_hook(TracerHook::PadPushEventPre);
     }
 
+    fn signals() -> &'static [glib::subclass::Signal] {
+        static SIGNALS: Lazy<Vec<glib::subclass::Signal>> = Lazy::new(|| {
+            vec![glib::subclass::Signal::builder("write-log")
+                .action()
+                .param_types([Option::<String>::static_type()])
+                .class_handler(|_, args| {
+                    let obj = args[0].get::<super::QueueLevels>().unwrap();
+                    let obj = args[0].get::<super::QueueLevels>().unwrap();
+
+                    obj.imp()
+                        .write_log(args[1].get::<Option<String>>().unwrap());
+
+                    None
+                })
+                .build()]
+        });
+
+        SIGNALS.as_ref()
+    }
+
     fn dispose(&self) {
-        use std::io::prelude::*;
-
         let state = self.state.lock().unwrap();
-
-        let mut file = match std::fs::File::create(&state.settings.file) {
-            Ok(file) => file,
-            Err(err) => {
-                gst::error!(CAT, imp: self, "Failed to create file: {err}");
-                return;
-            }
-        };
-
-        gst::debug!(
-            CAT,
-            imp: self,
-            "Writing file {}",
-            state.settings.file.display()
-        );
-
-        for LogLine {
-            timestamp,
-            name,
-            idx,
-            ptr,
-            cur_level_bytes,
-            cur_level_time,
-            cur_level_buffers,
-            max_size_bytes,
-            max_size_time,
-            max_size_buffers,
-        } in &state.log
-        {
-            let res = if let Some(idx) = idx {
-                writeln!(&mut file, "{timestamp},{name}:{idx},0x{ptr:08x},{cur_level_bytes},{cur_level_time},{cur_level_buffers},{max_size_bytes},{max_size_time},{max_size_buffers}")
-            } else {
-                writeln!(&mut file, "{timestamp},{name},0x{ptr:08x},{cur_level_bytes},{cur_level_time},{cur_level_buffers},{max_size_bytes},{max_size_time},{max_size_buffers}")
-            };
-            if let Err(err) = res {
-                gst::error!(CAT, imp: self, "Failed to write to file: {err}");
-                return;
-            }
+        if !state.logs_written {
+            drop(state); // Release lock before writing
+            self.write_log(None);
         }
     }
 }
@@ -543,6 +527,57 @@ impl QueueLevels {
                 max_size_time,
                 max_size_buffers,
             });
+        }
+    }
+
+    fn write_log(&self, file_path: Option<String>) {
+        use std::io::prelude::*;
+
+        let mut state = self.state.lock().unwrap();
+        let mut file = match file_path.map_or_else(
+            || std::fs::File::create(&state.settings.file),
+            |path| std::fs::File::create(PathBuf::from(path)),
+        ) {
+            Ok(file) => file,
+            Err(err) => {
+                gst::error!(CAT, imp: self, "Failed to create file: {err}");
+                return;
+            }
+        };
+
+        let log = std::mem::replace(&mut state.log, Vec::new());
+        state.logs_written = true;
+        drop(state);
+
+        gst::debug!(
+            CAT,
+            imp: self,
+            "Writing file {:?}",
+            file
+        );
+
+        for LogLine {
+            timestamp,
+            name,
+            idx,
+            ptr,
+            cur_level_bytes,
+            cur_level_time,
+            cur_level_buffers,
+            max_size_bytes,
+            max_size_time,
+            max_size_buffers,
+        } in &log
+        {
+            let res = if let Some(idx) = idx {
+                writeln!(&mut file, "{timestamp},{name}:{idx},0x{ptr:08x},{cur_level_bytes},{cur_level_time},{cur_level_buffers},{max_size_bytes},{max_size_time},{max_size_buffers}")
+            } else {
+                writeln!(&mut file, "{timestamp},{name},0x{ptr:08x},{cur_level_bytes},{cur_level_time},{cur_level_buffers},{max_size_bytes},{max_size_time},{max_size_buffers}")
+            };
+            if let Err(err) = res {
+                gst::error!(CAT, imp: self, "Failed to write to file: {err}");
+                return;
+            }
         }
     }
 }
