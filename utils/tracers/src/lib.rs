@@ -15,6 +15,7 @@
 use gst::glib;
 
 mod buffer_lateness;
+mod memory_tracer;
 mod pcap_writer;
 #[cfg(unix)]
 mod pipeline_snapshot;
@@ -26,6 +27,7 @@ fn plugin_init(plugin: &gst::Plugin) -> Result<(), glib::BoolError> {
     queue_levels::register(plugin)?;
     buffer_lateness::register(plugin)?;
     pcap_writer::register(plugin)?;
+    memory_tracer::register(plugin)?;
     Ok(())
 }
 
