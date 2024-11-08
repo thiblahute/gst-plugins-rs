@@ -13,6 +13,8 @@ use gst::{
 use once_cell::sync::Lazy;
 use tokio::runtime;
 
+use crate::uridecodepool::decoderpipeline;
+
 use super::DecoderPipeline;
 
 pub static CAT: Lazy<gst::DebugCategory> = Lazy::new(|| {
@@ -94,11 +96,11 @@ impl ObjectImpl for UriDecodePool {
                     .param_types([gst::Pipeline::static_type()])
                     .build(),
                 glib::subclass::Signal::builder("prepared-pipeline-removed")
-                    .param_types([super::UriDecodePoolSrc::static_type()])
+                    .param_types([super::UriDecodePoolSrc::static_type(), glib::Object::static_type()])
                     .build(),
                 glib::subclass::Signal::builder("prepare-pipeline")
                     .param_types([super::UriDecodePoolSrc::static_type()])
-                    .return_type::<bool>()
+                    .return_type::<Option<glib::Object>>()
                     .action()
                     .class_handler(|_, args| {
                         let pool = args[0].get::<super::UriDecodePool>().unwrap();
@@ -163,7 +165,10 @@ impl UriDecodePool {
             drop(state);
 
             if let Some(src) = pipeline.imp().target_src() {
-                obj.emit_by_name::<()>("prepared-pipeline-removed", &[&src]);
+                obj.emit_by_name::<()>(
+                    "prepared-pipeline-removed",
+                    &[&src, pipeline.upcast_ref::<glib::Object>()],
+                );
             }
             if let Err(err) = pipeline.imp().release() {
                 gst::error!(CAT, "Failed to release pipeline: {}", err);
@@ -193,7 +198,10 @@ impl UriDecodePool {
 
             self.obj().emit_by_name::<()>(
                 "prepared-pipeline-removed",
-                &[&pipeline.imp().target_src().unwrap()],
+                &[
+                    &pipeline.imp().target_src().unwrap(),
+                    pipeline.upcast_ref::<glib::Object>(),
+                ],
             );
 
             if let Err(err) = pipeline.imp().release() {
@@ -206,7 +214,7 @@ impl UriDecodePool {
         false
     }
 
-    fn prepare_pipeline(&self, src: &super::UriDecodePoolSrc) -> bool {
+    fn prepare_pipeline(&self, src: &super::UriDecodePoolSrc) -> Option<glib::Object> {
         gst::info!(CAT, imp: self, "Preparing pipeline for {}:{:?}", src.name(), src as *const _);
 
         let mut state = self.state.lock().unwrap();
@@ -223,7 +231,7 @@ impl UriDecodePool {
                 src as *const _
             );
 
-            return false;
+            return None;
         }
 
         if state
@@ -237,19 +245,19 @@ impl UriDecodePool {
                 src.name(),
                 src as *const _
             );
-            return false;
+            return None;
         }
 
         let decoderpipe = self.get_unused_or_create_pipeline(src, &mut state);
         gst::debug!(CAT, imp: self, "Starting {decoderpipe:?}");
         if let Err(err) = decoderpipe.imp().play() {
             gst::warning!(CAT, imp: self, "Failed to play pipeline: {}", err);
-            return false;
+            return None;
         }
 
-        state.prepared_pipelines.push(decoderpipe);
+        state.prepared_pipelines.push(decoderpipe.clone());
 
-        true
+        Some(decoderpipe.upcast())
     }
 
     pub(crate) fn get(&self, src: &super::UriDecodePoolSrc) -> DecoderPipeline {
@@ -264,8 +272,10 @@ impl UriDecodePool {
             let pipe = state.prepared_pipelines.remove(position);
             drop(state);
 
-            self.obj()
-                .emit_by_name::<()>("prepared-pipeline-removed", &[&src]);
+            self.obj().emit_by_name::<()>(
+                "prepared-pipeline-removed",
+                &[&src, pipe.upcast_ref::<glib::Object>()],
+            );
 
             let pipeline = pipe.pipeline();
             gst::info!(
@@ -400,7 +410,7 @@ impl UriDecodePool {
     }
 
     fn pipeline_released_cb(&self, pipeline: DecoderPipeline) {
-        gst::log!(CAT, imp: self, "{} released.", pipeline.pipeline().name());
+        gst::debug!(CAT, imp: self, "{} released.", pipeline.pipeline().name());
 
         let mut state = self.state.lock().unwrap();
         if state.unused_pipelines.contains(&pipeline) {
@@ -426,10 +436,11 @@ impl UriDecodePool {
     }
 
     fn pipeline_stopped_cb(&self, pipeline: DecoderPipeline) {
-        gst::log!(CAT, imp: self, "{} not used stopped.", pipeline.pipeline().name());
+        gst::debug!(CAT, imp: self, "{} not used stopped.", pipeline.pipeline().name());
 
         let mut outstandings = self.outstandings.n.lock().unwrap();
         *outstandings -= 1u32;
+        gst::debug!(CAT, imp: self, "Outstanding pipelines: {}", *outstandings);
         self.outstandings.cond.notify_one();
     }
 
@@ -519,6 +530,7 @@ impl UriDecodePool {
             drop(state);
         }
 
+        gst::info!(CAT, "Releasing pipeline {}", pipeline.imp().name());
         if let Err(err) = pipeline.imp().release() {
             gst::error!(CAT, "Failed to release pipeline: {}", err);
         }

@@ -1216,7 +1216,7 @@ impl BaseSrcImpl for UriDecodePoolSrc {
         };
 
         *self.start_completed.lock().unwrap() = false;
-        gst::info!(CAT, imp: self, "Releasing {pipeline:?}");
+        gst::info!(CAT, imp: self, "Releasing {:?}", pipeline.imp().name());
         self.pool.release(pipeline);
 
         Ok(())
@@ -1268,4 +1268,3 @@ impl ChildProxyImpl for UriDecodePoolSrc {
         }
     }
 }
-
