@@ -165,7 +165,62 @@ impl DecoderPipeline {
         gst::debug!(CAT, imp: self, "Pad added: {:?}", pad);
         let sinkpad = self.sink.static_pad("sink").unwrap();
         if sinkpad.is_linked() {
-            gst::error!(CAT, imp: self, "Pad already linked");
+            let peer = sinkpad.peer().unwrap();
+
+            let pipeline = self.pipeline();
+            pipeline.debug_to_dot_file_with_ts(
+                gst::DebugGraphDetails::all(),
+                format!("{}-already-linked-pad", pipeline.name()),
+            );
+
+            gst::error!(CAT, imp: self, "Got pad {}:{} while {}:{} already linked to {}:{}",
+                pad.parent().unwrap().name(),
+                pad.name(),
+                sinkpad.parent().unwrap().name(),
+                sinkpad.name(),
+                peer.parent().unwrap().name(), peer.name());
+            return;
+        }
+
+        if pad
+            .stream()
+            .map_or(false, |s| matches!(s.stream_type(), gst::StreamType::VIDEO))
+        {
+            let filter =
+                gst::parse::bin_from_description(
+                    "glupload ! glcolorconvert ! capsfilter caps=\"video/x-raw(memory:GLMemory),format=RGBA\"",
+                    true
+                ).expect("Could not link converter bin>");
+            gst::debug!(CAT, imp: self, "Got filter: {filter:?}");
+            if let Err(err) = self.pipeline().add(&filter) {
+                gst::error!(CAT, imp: self, "Failed to add filter: {:?}", err);
+                return;
+            }
+
+            filter.sync_state_with_parent().unwrap();
+
+            let filter_sinkpad = filter.sink_pads().first().unwrap().clone();
+            if let Err(err) = pad.link(&filter_sinkpad) {
+                gst::error!(CAT, imp: self, "Failed to link pads: {:?}", err);
+                gst::error!(CAT, imp: self, "Failed link pads {:?}:{:?}: {:#?}\n -> {:?}:{}: {:#?} \n: {:?}",
+                        pad.parent().map(|p| p.name()), pad.name(),
+                        pad.query_caps(None),
+                        sinkpad.parent().map(|p| p.name()), sinkpad.name(),
+                        sinkpad.query_caps(None),
+                        err);
+            }
+
+            let pad = filter.src_pads().first().unwrap().clone();
+            if let Err(err) = pad.link(&sinkpad) {
+                gst::error!(CAT, imp: self, "Failed to link pads: {:?}", err);
+                gst::error!(CAT, imp: self, "Failed link pads {:?}:{:?}: {:#?}\n -> {:?}:{}: {:#?} \n: {:?}",
+                        pad.parent().map(|p| p.name()), pad.name(),
+                        pad.query_caps(None),
+                        sinkpad.parent().map(|p| p.name()), sinkpad.name(),
+                        sinkpad.query_caps(None),
+                        err);
+            }
+
             return;
         }
 
