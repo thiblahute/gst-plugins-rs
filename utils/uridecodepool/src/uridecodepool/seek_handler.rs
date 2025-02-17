@@ -331,7 +331,7 @@ impl SeekHandler {
 
         let duration = obj.duration();
         if duration.is_none() {
-            gst::error!(CAT, obj: obj, "No duration, not using NLE seek");
+            gst::info!(CAT, obj: obj, "No duration, not using NLE seek");
             return false;
         }
 
