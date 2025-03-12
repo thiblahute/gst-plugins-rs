@@ -488,6 +488,7 @@ impl DecoderPipeline {
                     && s.current() == gst::State::Playing
                     && self.state.lock().unwrap().pending_seek.as_ref().is_some()
                 {
+                    gst::debug!(CAT, obj: self.pipeline, "Pipeline reached PLAYING state --> preparing seek");
                     self.seek_in_thread();
                 }
             }
@@ -497,8 +498,6 @@ impl DecoderPipeline {
 
     fn seek_in_thread(&self) {
         let pipeline = self.pipeline();
-
-        gst::debug!(CAT, obj: self.pipeline, "Pipeline got STREAMN_SELECTION... pushing seek!");
 
         // Send seek from some other thread to avoid deadlocks
         pipeline.call_async(glib::clone!(@weak self as this => move |pipeline| {
