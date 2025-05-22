@@ -339,6 +339,7 @@ impl UriDecodePool {
         let uri = src.uri();
         let caps = src.caps();
         let stream_id = src.stream_id();
+        gst::error!(CAT, "Getting seek for {} - {uri:?}", src.name());
         let seek = src.imp().initial_seek_event();
 
         let decoderpipe = if let Some(position) = state.pooled.iter().position(|p| {
@@ -348,7 +349,7 @@ impl UriDecodePool {
                     .map_or(false, |id| Some(id) == stream_id)
                 && false
         }) {
-            gst::debug!(CAT, "Reusing the exact same pipeline for {:?}", stream_id);
+            gst::error!(CAT, "Reusing the exact same pipeline for {:?}", stream_id);
             Some(state.pooled.remove(position))
         } else if let Some(position) = state.pooled.iter().position(|p| {
             let initial_seek = p.imp().initial_seek();
@@ -396,7 +397,7 @@ impl UriDecodePool {
                     &self.obj(),
                     seek,
                 );
-                gst::info!(
+                gst::error!(
                     CAT,
                     "Started new pipeline for {:?} -> {}",
                     src.name(),

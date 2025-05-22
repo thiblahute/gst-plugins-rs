@@ -248,7 +248,7 @@ impl SeekHandler {
                 );
                 state.handled_composition_seek = false;
                 state.nle_seek = None;
-                gst::info!(CAT, obj = obj, "Faking EOS");
+                gst::error!(CAT, obj = obj, "Faking EOS");
                 return Err(gst::FlowError::Eos);
             }
         } else {
@@ -290,7 +290,7 @@ impl SeekHandler {
                 );
                 state.handled_composition_seek = false;
                 state.nle_seek = None;
-                gst::info!(CAT, obj = obj, "Faking EOS");
+                gst::error!(CAT, obj = obj, "Faking EOS");
                 return Err(gst::FlowError::Eos);
             }
         }
@@ -420,7 +420,7 @@ impl SeekHandler {
                 }
             }
 
-            gst::info!(CAT, obj = obj, "Faking EOS before starting");
+            gst::error!(CAT, obj = obj, "----- Faking EOS before starting");
             return Err((gst::FlowError::Eos, None));
         }
 
